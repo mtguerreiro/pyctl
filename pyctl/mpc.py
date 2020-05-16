@@ -1,8 +1,27 @@
 import numpy as np
+import pyctl as ctl
 
 
 def aug(Am, Bm, Cm):
-    """Determines the augmented model.
+    r"""Determines the augmented model. For now, only one control signal is
+    supported.
+
+    Parameters
+    ----------
+    Am : np.array
+        An (n, n) numpy matrix.
+
+    Bm : np.array
+        An (n, 1) numpy matrix.
+
+    Cm : np.array
+        A (1, n) numpy matrix.
+
+    Returns
+    -------
+    (A, B, C) : tuple
+        A tuple containing the augmented matrices.
+    
     """
     n = Am.shape[0]
     zeros_n = np.zeros((n, 1))
@@ -23,7 +42,13 @@ def aug(Am, Bm, Cm):
 
 
 def opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c):
+    r"""Provides the control vector miniming the expression
 
+    .. :math:
+
+        J = (R_s - Y)^T(R_s - Y) + \Delta U^T R \Delta U.
+
+    """
     R_s = r_ki * np.ones((n_p, 1))
     R = r_w * np.eye(n_c)
     
@@ -65,3 +90,24 @@ def sim(A, B, C, u, x_ki, n_p):
         y[i, :] = C @ x[i, :]
 
     return (x, y)
+
+
+class system:
+
+    def __init__(self, Am, Bm, Cm):
+        self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
+
+    
+    def opt(self, x_ki, r_ki, r_w, n_p, n_c):
+
+        DU = ctl.mpc.opt(self.A, self.B, self.C, x_ki, r_ki, r_w, n_p, n_c) 
+
+        return DU
+
+    
+    def sim(self, u, x_ki, n_p):
+
+        x, y = ctl.mpc.sim(self.A, self.B, self.C, u, x_ki, n_p)
+
+        return (x, y)
+    
