@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 a = 0.8
 b = 0.1
 c = 1
-r_w = 10
+r_w = 1
 x_ki = np.array([[0.1], [0.2]])
 r_ki = 1
 
@@ -20,11 +20,11 @@ Cm = np.array([c])
 # --- System ---
 sys = ctl.mpc.system(Am, Bm, Cm)
 
-# --- Optimization and sim ---
-u = sys.opt(x_ki, r_ki, r_w, n_p, n_c)
-x, y = sys.sim(u, x_ki, n_p + 1)
+# --- Sim with receding horizon ---
+(u, x, y) = sys.sim(x_ki, 0, r_ki, r_w, 10, n_p, n_c)
 
 # --- Plots ---
 plt.ion()
+plt.plot(u, '--x')
 plt.plot(x, '--x')
 

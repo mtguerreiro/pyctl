@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 a = 0.8
 b = 0.1
 c = 1
-r_w = 0
+r_w = 10
 x_ki = np.array([[0.1], [0.2]])
 r_ki = 1
 
@@ -21,11 +21,10 @@ Cm = np.array([c])
 A, B, C = ctl.mpc.aug(Am, Bm, Cm)
 
 # --- Optimization and sim ---
-DU = ctl.mpc.opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c)
+du = ctl.mpc.opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c)
 
-(x, y) = ctl.mpc.sim(A, B, C, DU, x_ki, n_p + 1)
+(dx, y) = ctl.mpc.predict_horizon(A, B, C, du, x_ki, n_p + 1)
 
 # --- Plots ---
 plt.ion()
-plt.plot(x, '--x')
-#plt.plot(y)
+plt.plot(dx, '--x')

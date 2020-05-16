@@ -3,8 +3,8 @@ import pyctl as ctl
 
 
 def aug(Am, Bm, Cm):
-    r"""Determines the augmented model. For now, only one control signal is
-    supported.
+    r"""Determines the augmented model. For now, only one control signal and
+    one output is supported.
 
     Parameters
     ----------
@@ -49,6 +49,7 @@ def opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c):
         J = (R_s - Y)^T(R_s - Y) + \Delta U^T R \Delta U.
 
     """
+    x_ki = x_ki.reshape(-1, 1)
     R_s = r_ki * np.ones((n_p, 1))
     R = r_w * np.eye(n_c)
     
@@ -72,8 +73,9 @@ def opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c):
     return DU
 
 
-def sim(A, B, C, u, x_ki, n_p):
-    
+def predict_horizon(A, B, C, u, x_ki, n_p):
+
+    x_ki = x_ki.reshape(-1, 1)
     n_c = u.shape[0]
 
     x = np.zeros((n_p, x_ki.shape[0]))
@@ -96,18 +98,65 @@ class system:
 
     def __init__(self, Am, Bm, Cm):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
+        self.Am = Am
+        self.Bm = Bm
+        self.Cm = Cm
+
+
+    def model_matrices(self):
+
+        return (self.Am, self.Bm, self.Cm)
+
+
+    def aug_matrices (self):
+
+        return (self.A, self.B, self.C)
 
     
     def opt(self, x_ki, r_ki, r_w, n_p, n_c):
 
-        DU = ctl.mpc.opt(self.A, self.B, self.C, x_ki, r_ki, r_w, n_p, n_c) 
+        A, B, C = self.aug_matrices()
+        DU = ctl.mpc.opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c) 
 
         return DU
 
     
-    def sim(self, u, x_ki, n_p):
+    def predict_horizon(self, u, x_ki, n_p):
 
-        x, y = ctl.mpc.sim(self.A, self.B, self.C, u, x_ki, n_p)
+        A, B, C = self.aug_matrices()
+        x, y = ctl.mpc.predict_horizon(A, B, C, u, x_ki, n_p)
 
         return (x, y)
+
     
+    def sim(self, x_ki, u_0, r_ki, r_w, n, n_p, n_c):
+
+        Am, Bm, Cm = self.model_matrices()
+        n_x = Am.shape[0]
+        n_y = Cm.shape[0]
+        n_dx = n_x + n_y
+        
+        u = np.zeros((n, 1))
+        x = np.zeros((n, n_x))
+        y = np.zeros((n, n_y))
+        dx = np.zeros((n, n_x + n_y))
+        
+        y[0, :] = x_ki[n_x:]
+        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
+        dx[0, :] = x_ki.reshape(-1)
+        
+        u_p = u_0
+
+        for i in range(1, n):
+            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
+            u[i - 1] = u_p + du[0]
+            u_p = u[i - 1]
+            
+            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
+            y[i, :] = Cm @ x[i, :]
+
+            dx[i, :n_x] = x[i, :] - x[i - 1, :]
+            dx[i, n_x:] = y[i, :]
+        
+        return (u, x, y)
+            
