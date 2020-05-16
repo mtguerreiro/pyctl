@@ -45,3 +45,23 @@ def opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c):
     DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s - F @ x_ki)
     
     return DU
+
+
+def sim(A, B, C, u, x_ki, n_p):
+    
+    n_c = u.shape[0]
+
+    x = np.zeros((n_p, x_ki.shape[0]))
+    y = np.zeros((n_p, C.shape[0]))
+
+    x[0, :] = x_ki.reshape(-1)
+    y[0, :] = C @ x[0, :]
+    for i in range(1, n_c):
+        x[i, :] = A @ x[i - 1, :] + B @ u[i - 1]
+        y[i, :] = C @ x[i, :]
+        
+    for i in range(n_c, n_p):
+        x[i, :] = A @ x[i - 1, :]
+        y[i, :] = C @ x[i, :]
+
+    return (x, y)
