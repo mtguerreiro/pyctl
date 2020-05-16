@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 a = 0.8
 b = 0.1
 c = 1
-r_w = 10
+r_w = 0
 x_ki = np.array([[0.1], [0.2]])
 r_ki = 1
 

@@ -158,5 +158,5 @@ class system:
             dx[i, :n_x] = x[i, :] - x[i - 1, :]
             dx[i, n_x:] = y[i, :]
         
-        return (u, x, y)
+        return (u, x, y, dx)
             
