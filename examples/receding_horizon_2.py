@@ -18,13 +18,14 @@ Bm = np.array([b])
 Cm = np.array([c])
 
 # --- System ---
-sys = ctl.mpc.system(Am, Bm, Cm)
+#sys = ctl.mpc.system(Am, Bm, Cm)
+sys = ctl.mpc.system(Am, Bm, Cm, n_p=n_p, n_c=n_c, r_w=r_w)
 
 # --- Sim with receding horizon ---
-(u, x, y, dx) = sys.sim(x_ki, 0, r_ki, r_w, 10, n_p, n_c)
+#(u, x, y, dx) = sys.sim(x_ki, 0, r_ki, r_w, 10, n_p, n_c)
 
 # --- Plots ---
-plt.ion()
-plt.plot(u, '--o')
-plt.plot(x, '--x')
+#plt.ion()
+#plt.plot(u, '--o')
+#plt.plot(x, '--x')
 
