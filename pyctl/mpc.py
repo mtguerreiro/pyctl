@@ -60,7 +60,7 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
         The `B` matrix of the augmented model. An (1, n) numpy matrix.
 
     x_i : :class:`np.array`
-        Initial conditions of the states. An (n, 1) numpy matrix.
+        Initial conditions of the augmented states. An (n, 1) numpy matrix.
 
     r : :class:`int`, :class:`float`
         The set-point signal.
@@ -105,7 +105,7 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
 
 
 def predict_horizon(A, B, C, u, x_i, n_p):
-    """Predicts the system's response for a given control action and a given
+    r"""Predicts the system's response for a given control action and a given
     horizon.
 
     Parameters
@@ -124,7 +124,7 @@ def predict_horizon(A, B, C, u, x_i, n_p):
         number of control actions.
 
     x_i : :class:`np.array`
-        Initial conditions of the states. An (n, 1) numpy matrix.
+        Initial conditions of the augmented states. An (n, 1) numpy matrix.
 
     n_p : :class:`int`
         Length of prediction horizon. Should be equal or greater than the
@@ -199,7 +199,7 @@ def opt_matrices(A, B, C, n_p, n_c):
     return (F, Phi)
 
 
-class system:
+class System:
 
     def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, r_w=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
@@ -214,79 +214,180 @@ class system:
         
 
     def model_matrices(self):
+        r"""Helper function that returns the matrices :math:`A_m`, :math:`B_m`
+        and :math:`C_m` of the plant model.
 
+        Returns
+        -------
+        (Am, Bm, Cm) : :class:`tuple`
+            A tuple containing the three model matrices.
+        
+        """
         return (self.Am, self.Bm, self.Cm)
 
 
     def aug_matrices(self):
+        r"""Helper function that returns the matrices :math:`A`, :math:`B` and
+        :math:`C_m` of the augmented model.
 
+        Returns
+        -------
+        (A, B, C) : :class:`tuple`
+            A tuple containing the three matrices.
+        
+        """
         return (self.A, self.B, self.C)
 
 
     def set_predict_horizon(self, n_p):
+        r"""Sets the length of the predict horizon.
 
+        Parameters
+        ----------
+        n_p : :class:`int`
+            Length of prediction horizon.        
+        
+        """
         self.n_p = n_p
 
 
     def set_control_horizon(self, n_c):
+        r"""Sets the length of the control window.
 
+        Parameters
+        ----------
+        n_c : :class:`int`
+            Length of control window.
+        
+        """
         self.n_c = n_c
         
 
     def set_r_w(self, r_w):
+        r"""Sets the weight for optimization of the control vector.
 
+        Parameters
+        ----------
+        r_w : :class:`int`, :class:`float`
+            Weight.        
+        
+        """
         self.r_w = r_w
 
     
-    def opt(self, x_ki, r_ki, r_w, n_p, n_c):
+    def opt(self, x_i, r, r_w, n_p, n_c):
+        r"""Obtains the control vector minimizing the cost function.
 
+        Parameters
+        ----------
+        x_i : :class:`np.array`
+            Initial conditions of the augmented states. An (n, 1) numpy matrix.
+
+        r : :class:`int`, :class:`float`
+            The set-point signal.
+            
+        r_w : :class:`int`, :class:`float`
+            Weight of the control action.
+
+        n_p : :class:`int`
+            Length of prediction horizon.
+
+        n_c : :class:`int`
+            Length of the control window.
+        
+        Returns
+        -------
+        :class:`np.array`
+            An (n_c, 1) numpy matrix containing the optimal control values.
+        
+        """
         A, B, C = self.aug_matrices()
-        DU = ctl.mpc.opt(A, B, C, x_ki, r_ki, r_w, n_p, n_c) 
+        DU = ctl.mpc.opt(A, B, C, x_i, r, r_w, n_p, n_c) 
 
         return DU
 
     
-    def predict_horizon(self, u, x_ki, n_p):
+    def predict_horizon(self, u, x_i, n_p):
+        r"""Predicts the states and the output based on the control actions and
+        based on the given horizon.
 
+        Parameters
+        ----------
+        u : :class:`np.array`
+            The control values. An (n_c, 1) numpy matrix, where `n_c` is the
+            number of control actions.
+
+        x_i : :class:`np.array`
+            Initial conditions of the augmented states. An (n, 1) numpy matrix.
+
+        n_p : :class:`int`
+            Length of prediction horizon. Should be equal or greater than the
+            number of control actions.
+
+        Returns
+        -------
+        (x, y) : :class:`tuple`
+            A tuple containing two numpy matrices. The first matrix contains
+            the state values `x` and the second matrix contains the output
+            `y`.
+        
+        """
         A, B, C = self.aug_matrices()
         x, y = ctl.mpc.predict_horizon(A, B, C, u, x_ki, n_p)
 
         return (x, y)
 
-    
-    def sim(self, x_ki, u_0, r_ki, r_w, n, n_p, n_c):
 
-        Am, Bm, Cm = self.model_matrices()
-        n_x = Am.shape[0]
-        n_y = Cm.shape[0]
-        n_dx = n_x + n_y
-        
-        u = np.zeros((n, 1))
-        x = np.zeros((n, n_x))
-        y = np.zeros((n, n_y))
-        dx = np.zeros((n, n_x + n_y))
-        
-        y[0, :] = x_ki[n_x:]
-        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
-        dx[0, :] = x_ki.reshape(-1)
-        
-        u_p = u_0
-
-        for i in range(1, n):
-            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
-            u[i - 1] = u_p + du[0]
-            u_p = u[i - 1]
-            
-            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
-            y[i, :] = Cm @ x[i, :]
-
-            dx[i, :n_x] = x[i, :] - x[i - 1, :]
-            dx[i, n_x:] = y[i, :]
-        
-        return (u, x, y, dx)
+##    def rec_horizon(self, x_i, u_i, n, r_w=None, n_p=None, n_c=None):
+##
+##        if r_w is None:
+##            r_w = self.r_w
+##        if n_p is None:
+##            n_p = self.n_p
+##        if n_c is None:
+##            n_c = self.n_c
+##        
+##        Am, Bm, Cm = self.model_matrices()
+##
+##        n_x = Am.shape[0]
+##        n_y = Cm.shape[0]
+##        n_dx = n_x + n_y
+##        
+##        u = np.zeros((n, 1))
+##        x = np.zeros((n, n_x))
+##        y = np.zeros((n, n_y))
+##        dx = np.zeros((n, n_x + n_y))
+##        
+##        y[0, :] = x_ki[n_x:]
+##        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
+##        dx[0, :] = x_ki.reshape(-1)
+##        
+##        u_p = u_0
+##
+##        for i in range(1, n):
+##            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
+##            u[i - 1] = u_p + du[0]
+##            u_p = u[i - 1]
+##            
+##            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
+##            y[i, :] = Cm @ x[i, :]
+##
+##            dx[i, :n_x] = x[i, :] - x[i - 1, :]
+##            dx[i, n_x:] = y[i, :]
+##        
+##        return (u, x, y, dx)
 
     
     def opt_cl_gains(self):
+        r"""Computes the optimum gains :math:`K_y` and :math:`K_{mpc}`.
+
+        Returns
+        -------
+        (K_y, K_mpc) : :class:`tuple`
+            A tuple, containing two elements. The first element is the matrix
+            K_y and the second element is the matrix K_mpc.
+
+        """
 
         A, B, C = self.aug_matrices()
         n_p = self.n_p
@@ -306,28 +407,86 @@ class system:
         return (K_y[0].reshape(1, -1), K_mpc[0, :].reshape(1, -1))
 
 
-    def sim_cl(self, x_i, u_0, r, n):
+    def sim(self, x_i, u_0, r, n):
 
+        if type(r) is int or type(r) is float:
+            r = np.array([r])
         Am, Bm, Cm = self.model_matrices()
         A, B, C = self.aug_matrices()
+
+        n_xm = Am.shape[0]
         n_x = A.shape[0]
         n_y = C.shape[0]
         
-        u = np.zeros((n, 1))
+        x_m = np.zeros((n, n_xm))
         x = np.zeros((n, n_x))
         y = np.zeros((n, n_y))
-        
-        y[0, :] = C @ x_i
-        x[0, :x_i.shape[0]] = x_i.reshape(-1)
-        x[0, x_i.shape[0]:] = y[0, :]
+
+        u = np.zeros((n, 1))
+        u[0, :] = u_0
+
+        x_m[0, :] = x_i[:, 0].reshape(-1)
+        y[0, :] = Cm @ x_i[:, 0]
+
+        x[0, :n_xm] = (x_i[:, 0] - x_i[:, 1]).reshape(-1)
+        x[0, n_xm:] = y[0, :]
 
         K_y, K_mpc = self.opt_cl_gains()
         
         A_u = A - B @ K_mpc
         B_u = B @ K_y
-        for i in range(1, n):
-            x[i] = A_u @ x[i - 1, :] + B_u @ r
-            y[i] = C @ x[i, :]
+        for i in range(0, n - 1):
+            du = K_y @ r - K_mpc @ x[i, :]
+            u[i] = u[i] + du
 
-        return (x, y)
+            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
+            y[i + 1] = Cm @ x_m[i + 1]
+
+            x[i + 1, :n_xm] = x_m[i + 1, :] - x_m[i, :]
+            x[i + 1, n_xm:] = y[i + 1, :]
+            u[i + 1] = u[i]
+
+            #x[i] = A_u @ x[i - 1, :] + B_u @ r
+            #y[i] = C @ x[i, :]
+
+            #x_m[i] = x[i, :n_xm] + x[i - 1, :n_xm]
+
+        results = {}
+        results['x'] = x
+        results['u'] = u
+        results['y'] = y
+        results['x_m'] = x_m
+
+        return results
+
             
+##    def sim(self, x_ki, u_0, r_ki, r_w, n, n_p, n_c):
+##
+##        Am, Bm, Cm = self.model_matrices()
+##        n_x = Am.shape[0]
+##        n_y = Cm.shape[0]
+##        n_dx = n_x + n_y
+##        
+##        u = np.zeros((n, 1))
+##        x = np.zeros((n, n_x))
+##        y = np.zeros((n, n_y))
+##        dx = np.zeros((n, n_x + n_y))
+##        
+##        y[0, :] = x_ki[n_x:]
+##        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
+##        dx[0, :] = x_ki.reshape(-1)
+##        
+##        u_p = u_0
+##
+##        for i in range(1, n):
+##            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
+##            u[i - 1] = u_p + du[0]
+##            u_p = u[i - 1]
+##            
+##            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
+##            y[i, :] = Cm @ x[i, :]
+##
+##            dx[i, :n_x] = x[i, :] - x[i - 1, :]
+##            dx[i, n_x:] = y[i, :]
+##        
+##        return (u, x, y, dx)
