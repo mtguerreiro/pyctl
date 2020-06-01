@@ -65,13 +65,15 @@ class System:
         y[0, :] = Cd @ x_i
         
         for i in range(n - 1):
+            # Measures the output
+            y[i] = Cd @ x[i]
+            
             # Computes control action
             e = r - y[i]
             u = k_p * e
 
             # Aplies control action
             x[i + 1] = Ad @ x[i] + Bd @ u
-            y[i + 1] = Cd @ x[i + 1]
 
         # Updates last value of y
         y[n - 1] = Cd @ x[n - 1]

@@ -200,7 +200,60 @@ def opt_matrices(A, B, C, n_p, n_c):
 
 
 class System:
+    """A class to create a discrete-time system for model predictive control
+    simulations.
 
+    Parameters
+    ----------
+    Am : :class:`np.array`
+        Model matrix :math:`A_m`. An (n, n) numpy matrix.
+
+    Bm : :class:`np.array`
+        Model matrix :math:`B_m`. An (n, 1) numpy matrix.
+
+    Cm : :class:`np.array`
+        Model matrix :math:`C_m`. An (1, n) numpy matrix.
+
+    n_p : :class:`bool`, :class:`int`
+        Length of prediction horizon . Can be set later. By default, it is
+        `None`.
+
+    n_c : :class:`bool`, :class:`int`
+        Length of control window. Can be set later. By default, it is `None`.
+
+    r_w : :class:`bool`, :class:`int`
+        Weight of control action. Can be set later. By default, it is `None`.
+
+    Attributes
+    ----------
+    A : :class:`np.array`
+        Augmented model matrix :math:`A`.
+    
+    B : :class:`np.array`
+        Augmented model matrix :math:`B`.
+    
+    C : :class:`np.array`
+        Augmented model matrix :math:`C`.
+
+    Am : :class:`np.array`
+        Model matrix :math:`A_m`.
+    
+    Bm : :class:`np.array`
+        Model matrix :math:`B_m`.
+    
+    Cm : :class:`np.array`
+        Model matrix :math:`C_m`.
+    
+    n_p : :class:`bool`, :class:`int`
+        Length of prediction horizon.
+
+    n_c : :class:`bool`, :class:`int`
+        Size of control window.
+
+    r_w : :class:`bool`, :class:`int`
+        Weight of control action.
+    
+    """
     def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, r_w=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
         self.Am = Am
@@ -368,8 +421,33 @@ class System:
 
 
     def dmpc(self, x_i, u_i, r, n):
+        """Simulates the MPC closed-loop system.
+
+        Parameters
+        ----------
+        x_i : :class:`np.array`
+            The initial conditions. Should be a (n_x, 2) numpy matrix, where
+            `n_x` is the number of states of the model.
+
+        u_i : :class:`np.array`
+            The value of the control action at u(-1).
+
+        r : :class:`float`, :class:`np.array`
+            The set-point.
+
+        n : :class:`int`
+            Length of simulation.
+
+        Returns
+        -------
+        data : :class:`dict`
+            A dictionary containing the simulation results. The key `u`
+            contains the control actions, the key `x_m` contains the states
+            and the key `y` contains the output.
+
+        """
         if type(r) is int or type(r) is float:
-            r = np.array([r])
+            r = r * np.ones((n, 1))
         Am, Bm, Cm = self.model_matrices()
         A, B, C = self.aug_matrices()
 
@@ -383,16 +461,20 @@ class System:
 
         u = np.zeros((n, 1))
 
-        dx = x_i
+        x_m[0] = x_i[:, 0]
+        dx = x_i[:, 1]
         u[0] = u_i
 
         K_y, K_mpc = self.opt_cl_gains()
         K_x = K_mpc[0, :-1]
 
-        for i in range(0, n - 1):
-            # Computes the control law for sampling instant i
+        for i in range(n - 1):
+            # Updates the output and dx
+            y[i] = Cm @ x_m[i]
             dx = x_m[i] - dx
-            du = -K_y @ (y[i] - r) + -K_x @ dx
+
+            # Computes the control law for sampling instant i
+            du = -K_y @ (y[i] - r[i]) + -K_x @ dx
             u[i] = u[i] + du
 
             # Applies the control law
@@ -400,97 +482,15 @@ class System:
 
             # Update variables for next iteration
             dx = x_m[i]
-            u[i + 1] = u[i] 
+            u[i + 1] = u[i]
+
+
+        # Updates last value of y
+        y[n - 1] = Cm @ x_m[n - 1]
 
         results = {}
-        results['x'] = x
         results['u'] = u
-        results['y'] = y
         results['x_m'] = x_m
+        results['y'] = y
 
         return results
-    
-##    def sim(self, x_i, u_0, r, n):
-##
-##        if type(r) is int or type(r) is float:
-##            r = np.array([r])
-##        Am, Bm, Cm = self.model_matrices()
-##        A, B, C = self.aug_matrices()
-##
-##        n_xm = Am.shape[0]
-##        n_x = A.shape[0]
-##        n_y = C.shape[0]
-##        
-##        x_m = np.zeros((n, n_xm))
-##        x = np.zeros((n, n_x))
-##        y = np.zeros((n, n_y))
-##
-##        u = np.zeros((n, 1))
-##        u[0, :] = u_0
-##
-##        x_m[0, :] = x_i[:, 0].reshape(-1)
-##        y[0, :] = Cm @ x_i[:, 0]
-##
-##        x[0, :n_xm] = (x_i[:, 0] - x_i[:, 1]).reshape(-1)
-##        x[0, n_xm:] = y[0, :]
-##
-##        K_y, K_mpc = self.opt_cl_gains()
-##        
-##        A_u = A - B @ K_mpc
-##        B_u = B @ K_y
-##        for i in range(0, n - 1):
-##            du = K_y @ r - K_mpc @ x[i, :]
-##            u[i] = u[i] + du
-##
-##            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
-##            y[i + 1] = Cm @ x_m[i + 1]
-##
-##            x[i + 1, :n_xm] = x_m[i + 1, :] - x_m[i, :]
-##            x[i + 1, n_xm:] = y[i + 1, :]
-##            u[i + 1] = u[i]
-##
-####        for i in range(1, n):
-####            x[i] = A_u @ x[i - 1, :] + B_u @ r
-####            y[i] = C @ x[i, :]
-####
-####            x_m[i] = x[i, :n_xm] + x[i - 1, :n_xm]
-##
-##        results = {}
-##        results['x'] = x
-##        results['u'] = u
-##        results['y'] = y
-##        results['x_m'] = x_m
-##
-##        return results
-
-            
-##    def sim(self, x_ki, u_0, r_ki, r_w, n, n_p, n_c):
-##
-##        Am, Bm, Cm = self.model_matrices()
-##        n_x = Am.shape[0]
-##        n_y = Cm.shape[0]
-##        n_dx = n_x + n_y
-##        
-##        u = np.zeros((n, 1))
-##        x = np.zeros((n, n_x))
-##        y = np.zeros((n, n_y))
-##        dx = np.zeros((n, n_x + n_y))
-##        
-##        y[0, :] = x_ki[n_x:]
-##        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
-##        dx[0, :] = x_ki.reshape(-1)
-##        
-##        u_p = u_0
-##
-##        for i in range(1, n):
-##            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
-##            u[i - 1] = u_p + du[0]
-##            u_p = u[i - 1]
-##            
-##            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
-##            y[i, :] = Cm @ x[i, :]
-##
-##            dx[i, :n_x] = x[i, :] - x[i - 1, :]
-##            dx[i, n_x:] = y[i, :]
-##        
-##        return (u, x, y, dx)
