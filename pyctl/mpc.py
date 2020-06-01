@@ -337,46 +337,6 @@ class System:
 
         return (x, y)
 
-
-##    def rec_horizon(self, x_i, u_i, n, r_w=None, n_p=None, n_c=None):
-##
-##        if r_w is None:
-##            r_w = self.r_w
-##        if n_p is None:
-##            n_p = self.n_p
-##        if n_c is None:
-##            n_c = self.n_c
-##        
-##        Am, Bm, Cm = self.model_matrices()
-##
-##        n_x = Am.shape[0]
-##        n_y = Cm.shape[0]
-##        n_dx = n_x + n_y
-##        
-##        u = np.zeros((n, 1))
-##        x = np.zeros((n, n_x))
-##        y = np.zeros((n, n_y))
-##        dx = np.zeros((n, n_x + n_y))
-##        
-##        y[0, :] = x_ki[n_x:]
-##        x[0, :] = 1 / Cm * y[0, :] # This only works if C is 1-D (only one output)
-##        dx[0, :] = x_ki.reshape(-1)
-##        
-##        u_p = u_0
-##
-##        for i in range(1, n):
-##            du = self.opt(dx[i - 1].T, r_ki, r_w, n_p, n_c)
-##            u[i - 1] = u_p + du[0]
-##            u_p = u[i - 1]
-##            
-##            x[i, :] = Am @ x[i - 1, :] + Bm @ u[i - 1]
-##            y[i, :] = Cm @ x[i, :]
-##
-##            dx[i, :n_x] = x[i, :] - x[i - 1, :]
-##            dx[i, n_x:] = y[i, :]
-##        
-##        return (u, x, y, dx)
-
     
     def opt_cl_gains(self):
         r"""Computes the optimum gains :math:`K_y` and :math:`K_{mpc}`.
@@ -401,14 +361,13 @@ class System:
         Phi_t = Phi.T
 
         K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
-        K_y = K @ R_s_bar
         K_mpc = K @ F
+        K_y = K @ R_s_bar
 
         return (K_y[0].reshape(1, -1), K_mpc[0, :].reshape(1, -1))
 
 
-    def sim(self, x_i, u_0, r, n):
-
+    def dmpc(self, x_i, u_i, r, n):
         if type(r) is int or type(r) is float:
             r = np.array([r])
         Am, Bm, Cm = self.model_matrices()
@@ -423,33 +382,25 @@ class System:
         y = np.zeros((n, n_y))
 
         u = np.zeros((n, 1))
-        u[0, :] = u_0
 
-        x_m[0, :] = x_i[:, 0].reshape(-1)
-        y[0, :] = Cm @ x_i[:, 0]
-
-        x[0, :n_xm] = (x_i[:, 0] - x_i[:, 1]).reshape(-1)
-        x[0, n_xm:] = y[0, :]
+        dx = x_i
+        u[0] = u_i
 
         K_y, K_mpc = self.opt_cl_gains()
-        
-        A_u = A - B @ K_mpc
-        B_u = B @ K_y
+        K_x = K_mpc[0, :-1]
+
         for i in range(0, n - 1):
-            du = K_y @ r - K_mpc @ x[i, :]
+            # Computes the control law for sampling instant i
+            dx = x_m[i] - dx
+            du = -K_y @ (y[i] - r) + -K_x @ dx
             u[i] = u[i] + du
 
+            # Applies the control law
             x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
-            y[i + 1] = Cm @ x_m[i + 1]
 
-            x[i + 1, :n_xm] = x_m[i + 1, :] - x_m[i, :]
-            x[i + 1, n_xm:] = y[i + 1, :]
-            u[i + 1] = u[i]
-
-            #x[i] = A_u @ x[i - 1, :] + B_u @ r
-            #y[i] = C @ x[i, :]
-
-            #x_m[i] = x[i, :n_xm] + x[i - 1, :n_xm]
+            # Update variables for next iteration
+            dx = x_m[i]
+            u[i + 1] = u[i] 
 
         results = {}
         results['x'] = x
@@ -458,6 +409,59 @@ class System:
         results['x_m'] = x_m
 
         return results
+    
+##    def sim(self, x_i, u_0, r, n):
+##
+##        if type(r) is int or type(r) is float:
+##            r = np.array([r])
+##        Am, Bm, Cm = self.model_matrices()
+##        A, B, C = self.aug_matrices()
+##
+##        n_xm = Am.shape[0]
+##        n_x = A.shape[0]
+##        n_y = C.shape[0]
+##        
+##        x_m = np.zeros((n, n_xm))
+##        x = np.zeros((n, n_x))
+##        y = np.zeros((n, n_y))
+##
+##        u = np.zeros((n, 1))
+##        u[0, :] = u_0
+##
+##        x_m[0, :] = x_i[:, 0].reshape(-1)
+##        y[0, :] = Cm @ x_i[:, 0]
+##
+##        x[0, :n_xm] = (x_i[:, 0] - x_i[:, 1]).reshape(-1)
+##        x[0, n_xm:] = y[0, :]
+##
+##        K_y, K_mpc = self.opt_cl_gains()
+##        
+##        A_u = A - B @ K_mpc
+##        B_u = B @ K_y
+##        for i in range(0, n - 1):
+##            du = K_y @ r - K_mpc @ x[i, :]
+##            u[i] = u[i] + du
+##
+##            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
+##            y[i + 1] = Cm @ x_m[i + 1]
+##
+##            x[i + 1, :n_xm] = x_m[i + 1, :] - x_m[i, :]
+##            x[i + 1, n_xm:] = y[i + 1, :]
+##            u[i + 1] = u[i]
+##
+####        for i in range(1, n):
+####            x[i] = A_u @ x[i - 1, :] + B_u @ r
+####            y[i] = C @ x[i, :]
+####
+####            x_m[i] = x[i, :n_xm] + x[i - 1, :n_xm]
+##
+##        results = {}
+##        results['x'] = x
+##        results['u'] = u
+##        results['y'] = y
+##        results['x_m'] = x_m
+##
+##        return results
 
             
 ##    def sim(self, x_ki, u_0, r_ki, r_w, n, n_p, n_c):
