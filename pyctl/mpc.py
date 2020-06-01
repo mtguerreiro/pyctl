@@ -218,10 +218,10 @@ class System:
         Length of prediction horizon . Can be set later. By default, it is
         `None`.
 
-    n_c : :class:`bool`, :class:`int`
+    n_c : :class:`NoneType`, :class:`int`
         Length of control window. Can be set later. By default, it is `None`.
 
-    r_w : :class:`bool`, :class:`int`
+    r_w : :class:`NoneType`, :class:`int`
         Weight of control action. Can be set later. By default, it is `None`.
 
     Attributes
@@ -247,10 +247,10 @@ class System:
     n_p : :class:`bool`, :class:`int`
         Length of prediction horizon.
 
-    n_c : :class:`bool`, :class:`int`
+    n_c : :class:`NoneType`, :class:`int`
         Size of control window.
 
-    r_w : :class:`bool`, :class:`int`
+    r_w : :class:`NoneType`, :class:`int`
         Weight of control action.
     
     """
