@@ -23,20 +23,28 @@ def aug(Am, Bm, Cm):
         A tuple containing the augmented matrices.
     
     """
+    # Number of states
     n = Am.shape[0]
+
+    # Number of inputs
+    m = Bm.shape[1]
+
+    # Number of outputs
+    q = Cm.shape[0]
+    
     zeros_n = np.zeros((n, 1))
 
-    A = np.zeros((n + 1, n + 1))
+    A = np.zeros((n + q, n + q))
     A[:n, :n] = Am
-    A[-1, :n] = Cm @ Am
-    A[-1, -1] = 1
+    A[n:, :n] = Cm @ Am
+    A[n:, n:] = np.eye(q)
 
-    B = np.zeros((n + 1, 1))
+    B = np.zeros((n + q, m))
     B[:n] = Bm
-    B[-1] = Cm @ Bm
+    B[n:] = Cm @ Bm
 
-    C = np.zeros((1, n + 1))
-    C[0, -1] = 1
+    C = np.zeros((q, n + q))
+    C[:, n:] = np.eye(q)
 
     return (A, B, C)
 
@@ -80,25 +88,39 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
         An (n_c, 1) numpy matrix containing the optimal control values.
 
     """
-    x_i = x_i.reshape(-1, 1)
-    R_s = r * np.ones((n_p, 1))
-    R = r_w * np.eye(n_c)
+    # Number of states
+    n = A.shape[0]
 
-    F = np.zeros((n_p, (C @ A).shape[1]))
-    F[0, :] = C @ A
+    # Number of inputs
+    m = B.shape[1]
+
+    # Number of outputs
+    q = C.shape[0]
+
+    x_i = x_i.reshape(-1, 1)
+
+    R_s = np.zeros((n_p * q, 1))
+    for i in range(n_p):
+        R_s[ (q * i) : (q * (i + 1)), 0] = r
+
+    R = np.zeros((n_c * m, n_c * m))
+    for i in range(n_c):
+        R[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
+        
+    F = np.zeros((n_p * q, (C @ A).shape[1]))
+    F[:q, :] = C @ A
     for i in range(1, n_p):
-        F[i, :] = F[i - 1, :] @ A
-    
-    Phi = np.zeros((n_p, n_c))
-    Phi[0, 0] = C @ B
+        F[(q*i):(q*(i+1)), :] = F[(q*(i-1)), :] @ A
+
+    Phi = np.zeros((n_p * q, n_c * m))
+    Phi[:q, :m] = C @ B
     for i in range(1, n_p):
         A_p = np.linalg.matrix_power(A, i)
-        Phi[i, 0] = C @ A_p @ B
+        Phi[ (q * i) : ( q * (i + 1) ), :m] = C @ A_p @ B
         for j in range(n_c - 1):
-            Phi[i, j + 1] = Phi[i - 1, j]
+            Phi[ (q * i) : ( q * (i + 1) ), m * (j + 1) : m * (j + 2)] = Phi[ ( q * (i - 1) ) : (q * i), m * j : m * (j + 1)]
 
     Phi_t = Phi.T
-
     DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s - F @ x_i)
     
     return DU
