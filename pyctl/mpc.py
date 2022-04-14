@@ -3,8 +3,7 @@ import pyctl as ctl
 
 
 def aug(Am, Bm, Cm):
-    r"""Determines the augmented model. For now, only one control signal and
-    one output is supported.
+    r"""Determines the augmented model.
 
     Parameters
     ----------
@@ -74,7 +73,7 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
     r : :class:`int`, :class:`float`
         The set-point signal.
 
-    r_w : :class:`int`, :class:`float`
+    r_w : :class:`int`, :class:`float`, :class:`np.array`
         Weight of the control action.
 
     n_p : :class:`int`
@@ -263,7 +262,7 @@ class System:
     n_c : :class:`NoneType`, :class:`int`
         Length of control window. Can be set later. By default, it is `None`.
 
-    r_w : :class:`NoneType`, :class:`int`
+    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weight of control action. Can be set later. By default, it is `None`.
 
     Attributes
@@ -365,10 +364,12 @@ class System:
 
         Parameters
         ----------
-        r_w : :class:`int`, :class:`float`
+        r_w : :class:`int`, :class:`float`, :class:`np.array`
             Weight.        
         
         """
+        if type(r_w) is int or type(r_w) is float:
+            r_w = np.array([r_w])
         self.r_w = r_w
 
     
@@ -489,7 +490,7 @@ class System:
         Parameters
         ----------
         x_i : :class:`np.array`
-            The initial conditions. Should be a (n_x, 2) numpy matrix, where
+            The initial conditions. Should be an (n_x, 1) numpy matrix, where
             `n_x` is the number of states of the model.
 
         u_i : :class:`np.array`
