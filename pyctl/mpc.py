@@ -32,7 +32,10 @@ def aug(Am, Bm, Cm):
         m = Bm.shape[1]
 
     # Number of outputs
-    q = Cm.shape[0]
+    if Cm.ndim == 1:
+        q = 1
+    else:
+        q = Cm.shape[0]
 
     A = np.zeros((n + q, n + q))
     A[:n, :n] = Am
@@ -101,7 +104,10 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
         m = B.shape[1]
 
     # Number of outputs
-    q = C.shape[0]
+    if C.ndim == 1:
+        q = 1
+    else:
+        q = C.shape[0]
 
     x_i = x_i.reshape(-1, 1)
 
@@ -222,7 +228,10 @@ def opt_matrices(A, B, C, n_p, n_c):
         m = B.shape[1]
 
     # Number of outputs
-    q = C.shape[0]
+    if C.ndim == 1:
+        q = 1
+    else:
+        q = C.shape[0]
     
     F = np.zeros((n_p * q, A.shape[1]))
     F[:q, :] = C @ A
@@ -461,13 +470,12 @@ class System:
             m = B.shape[1]
 
         # Number of outputs
-        q = C.shape[0]
+        if C.ndim == 1:
+            q = 1
+        else:
+            q = C.shape[0]
 
         R_s_bar = np.tile(np.eye(q), (n_p, 1))
-        # R_s_bar = np.eye(n_p * q)
-        #  R_s_bar = np.zeros((n_p * q, 1))
-        #  for i in range(n_p):
-        #      R_s_bar[ (q * i) : (q * (i + 1)), 0] = 1
 
         R = np.zeros((n_c * m, n_c * m))
         for i in range(n_c):
@@ -481,7 +489,6 @@ class System:
         K_y = K @ R_s_bar
 
         return (K_y[:m], K_mpc[:m, :])
-        #return (K_y[0].reshape(1, -1), K_mpc[0, :].reshape(1, -1))
 
 
     def dmpc(self, x_i, u_i, r, n):
