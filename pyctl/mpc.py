@@ -12,10 +12,10 @@ def aug(Am, Bm, Cm):
         An (n, n) numpy matrix.
 
     Bm : np.array
-        An (n, 1) numpy matrix.
+        An (n, m) numpy matrix.
 
     Cm : np.array
-        A (1, n) numpy matrix.
+        A (q, n) numpy matrix.
 
     Returns
     -------
@@ -27,12 +27,13 @@ def aug(Am, Bm, Cm):
     n = Am.shape[0]
 
     # Number of inputs
-    m = Bm.shape[1]
+    if Bm.ndim == 1:
+        m = 1
+    else:
+        m = Bm.shape[1]
 
     # Number of outputs
     q = Cm.shape[0]
-    
-    zeros_n = np.zeros((n, 1))
 
     A = np.zeros((n + q, n + q))
     A[:n, :n] = Am
@@ -40,8 +41,8 @@ def aug(Am, Bm, Cm):
     A[n:, n:] = np.eye(q)
 
     B = np.zeros((n + q, m))
-    B[:n] = Bm
-    B[n:] = Cm @ Bm
+    B[:n, :] = Bm
+    B[n:, :] = Cm @ Bm
 
     C = np.zeros((q, n + q))
     C[:, n:] = np.eye(q)
@@ -62,10 +63,10 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
         The `A` matrix of the augmented model. An (n, n) numpy matrix.
 
     B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, 1) numpy matrix.
+        The `B` matrix of the augmented model. An (n, m) numpy matrix.
 
     C : :class:`np.array`
-        The `B` matrix of the augmented model. An (1, n) numpy matrix.
+        The `B` matrix of the augmented model. An (q, n) numpy matrix.
 
     x_i : :class:`np.array`
         Initial conditions of the augmented states. An (n, 1) numpy matrix.
@@ -85,32 +86,39 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
     Returns
     -------
     :class:`np.array`
-        An (n_c, 1) numpy matrix containing the optimal control values.
+        An (n_c * m, 1) numpy matrix containing the optimal control values.
 
     """
+    if type(r_w) is int or type(r_w) is float:
+        r_w = np.array([r_w])
+            
     # Number of states
     n = A.shape[0]
 
     # Number of inputs
-    m = B.shape[1]
+    if B.ndim == 1:
+        m = 1
+    else:
+        m = B.shape[1]
 
     # Number of outputs
     q = C.shape[0]
 
     x_i = x_i.reshape(-1, 1)
 
-    R_s = np.zeros((n_p * q, 1))
-    for i in range(n_p):
-        R_s[ (q * i) : (q * (i + 1)), 0] = r
+    R_s_bar = np.tile(np.eye(q), (n_p, 1))
+    # R_s = np.zeros((n_p * q, 1))
+    # for i in range(n_p):
+    #    R_s[ (q * i) : (q * (i + 1)), 0] = r
 
     R = np.zeros((n_c * m, n_c * m))
     for i in range(n_c):
         R[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
         
-    F = np.zeros((n_p * q, (C @ A).shape[1]))
+    F = np.zeros((n_p * q, A.shape[1]))
     F[:q, :] = C @ A
     for i in range(1, n_p):
-        F[(q*i):(q*(i+1)), :] = F[(q*(i-1)), :] @ A
+        F[q * i : q * (i + 1), :] = F[q * (i - 1) : q * i, :] @ A
 
     Phi = np.zeros((n_p * q, n_c * m))
     Phi[:q, :m] = C @ B
@@ -121,7 +129,7 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
             Phi[ (q * i) : ( q * (i + 1) ), m * (j + 1) : m * (j + 2)] = Phi[ ( q * (i - 1) ) : (q * i), m * j : m * (j + 1)]
 
     Phi_t = Phi.T
-    DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s - F @ x_i)
+    DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s_bar - F @ x_i)
     
     return DU
 
@@ -136,10 +144,10 @@ def predict_horizon(A, B, C, u, x_i, n_p):
         The `A` matrix of the augmented model. An (n, n) numpy matrix.
 
     B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, 1) numpy matrix.
+        The `B` matrix of the augmented model. An (n, m) numpy matrix.
 
     C : :class:`np.array`
-        The `B` matrix of the augmented model. An (1, n) numpy matrix.
+        The `B` matrix of the augmented model. An (q, n) numpy matrix.
 
     u : :class:`np.array`
         The control values. An (n_c, 1) numpy matrix, where `n_c` is the
@@ -187,10 +195,10 @@ def opt_matrices(A, B, C, n_p, n_c):
         The `A` matrix of the augmented model. An (n, n) numpy matrix.
 
     B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, 1) numpy matrix.
+        The `B` matrix of the augmented model. An (n, m) numpy matrix.
 
     C : :class:`np.array`
-        The `B` matrix of the augmented model. An (1, n) numpy matrix.
+        The `B` matrix of the augmented model. An (q, n) numpy matrix.
 
     n_p : :class:`int`
         Length of prediction horizon.
@@ -205,18 +213,30 @@ def opt_matrices(A, B, C, n_p, n_c):
         second item corresponds to the `Phi` matrix.
     
     """
-    F = np.zeros((n_p, (C @ A).shape[1]))
-    F[0, :] = C @ A
-    for i in range(1, n_p):
-        F[i, :] = F[i - 1, :] @ A
+    # Number of states
+    n = A.shape[0]
 
-    Phi = np.zeros((n_p, n_c))
-    Phi[0, 0] = C @ B
+    # Number of inputs
+    if B.ndim == 1:
+        m = 1
+    else:
+        m = B.shape[1]
+
+    # Number of outputs
+    q = C.shape[0]
+    
+    F = np.zeros((n_p * q, A.shape[1]))
+    F[:q, :] = C @ A
+    for i in range(1, n_p):
+        F[q * i : q * (i + 1), :] = F[q * (i - 1) : q * i, :] @ A
+
+    Phi = np.zeros((n_p * q, n_c * m))
+    Phi[:q, :m] = C @ B
     for i in range(1, n_p):
         A_p = np.linalg.matrix_power(A, i)
-        Phi[i, 0] = C @ A_p @ B
+        Phi[ (q * i) : ( q * (i + 1) ), :m] = C @ A_p @ B
         for j in range(n_c - 1):
-            Phi[i, j + 1] = Phi[i - 1, j]
+            Phi[ (q * i) : ( q * (i + 1) ), m * (j + 1) : m * (j + 2)] = Phi[ ( q * (i - 1) ) : (q * i), m * j : m * (j + 1)]
 
     return (F, Phi)
 
@@ -231,10 +251,10 @@ class System:
         Model matrix :math:`A_m`. An (n, n) numpy matrix.
 
     Bm : :class:`np.array`
-        Model matrix :math:`B_m`. An (n, 1) numpy matrix.
+        Model matrix :math:`B_m`. An (n, m) numpy matrix.
 
     Cm : :class:`np.array`
-        Model matrix :math:`C_m`. An (1, n) numpy matrix.
+        Model matrix :math:`C_m`. An (q, n) numpy matrix.
 
     n_p : :class:`bool`, :class:`int`
         Length of prediction horizon . Can be set later. By default, it is
@@ -285,6 +305,8 @@ class System:
         self.n_p = n_p
         self.n_c = n_c
 
+        if type(r_w) is int or type(r_w) is float:
+            r_w = np.array([r_w])
         self.r_w = r_w
         
 
@@ -422,24 +444,43 @@ class System:
             A tuple, containing two elements. The first element is the matrix
             K_y and the second element is the matrix K_mpc.
 
-        """
-
+        """    
         A, B, C = self.aug_matrices()
         n_p = self.n_p
         n_c = self.n_c
         r_w = self.r_w
-        
-        R_s_bar = np.ones((n_p, 1))
-        R = r_w * np.eye(n_c)
-        
+
+        # Number of states
+        n = A.shape[0]
+
+        # Number of inputs
+        if B.ndim == 1:
+            m = 1
+        else:
+            m = B.shape[1]
+
+        # Number of outputs
+        q = C.shape[0]
+
+        R_s_bar = np.tile(np.eye(q), (n_p, 1))
+        # R_s_bar = np.eye(n_p * q)
+        #  R_s_bar = np.zeros((n_p * q, 1))
+        #  for i in range(n_p):
+        #      R_s_bar[ (q * i) : (q * (i + 1)), 0] = 1
+
+        R = np.zeros((n_c * m, n_c * m))
+        for i in range(n_c):
+            R[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
+
         F, Phi = ctl.mpc.opt_matrices(A, B, C, n_p, n_c)
         Phi_t = Phi.T
-
+        
         K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
         K_mpc = K @ F
         K_y = K @ R_s_bar
 
-        return (K_y[0].reshape(1, -1), K_mpc[0, :].reshape(1, -1))
+        return (K_y[:m], K_mpc[:m, :])
+        #return (K_y[0].reshape(1, -1), K_mpc[0, :].reshape(1, -1))
 
 
     def dmpc(self, x_i, u_i, r, n):
@@ -470,25 +511,29 @@ class System:
         """
         if type(r) is int or type(r) is float:
             r = r * np.ones((n, 1))
+        if type(r) is np.ndarray and r.ndim == 1:
+            r = np.tile(r, (n, 1))
+            
         Am, Bm, Cm = self.model_matrices()
         A, B, C = self.aug_matrices()
 
         n_xm = Am.shape[0]
         n_x = A.shape[0]
         n_y = C.shape[0]
+        n_u = B.shape[1]
         
         x_m = np.zeros((n, n_xm))
         x = np.zeros((n, n_x))
         y = np.zeros((n, n_y))
 
-        u = np.zeros((n, 1))
+        u = np.zeros((n, n_u))
 
         x_m[0] = x_i[:, 0]
         dx = x_i[:, 1]
         u[0] = u_i
 
         K_y, K_mpc = self.opt_cl_gains()
-        K_x = K_mpc[0, :-1]
+        K_x = K_mpc[:, :n_xm]
 
         for i in range(n - 1):
             # Updates the output and dx
