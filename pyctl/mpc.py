@@ -491,7 +491,7 @@ class System:
         return (K_y[:m], K_mpc[:m, :])
 
 
-    def dmpc(self, x_i, u_i, r, n):
+    def dmpc(self, x_i, u_i, r, n, Bd=None, u_d=None):
         """Simulates the MPC closed-loop system.
 
         Parameters
@@ -508,6 +508,17 @@ class System:
 
         n : :class:`int`
             Length of simulation.
+
+        Bd : :class:`np.array`
+            An (p, p) numpy matrix, where `p` is the number of disturbances.
+            By default, it is `None`.
+
+        u_d : :class:`np.array`
+            An (p, 1) or (p, n) numpy matrix, where `p` is the number of
+            disturbances. If the second dimension is 1, the disturbance is
+            considered to be constant during the entire period. Otherwise,
+            it must contain `n` values to be used during the entire
+            simulation. By default, it is `None`.
 
         Returns
         -------
@@ -543,6 +554,16 @@ class System:
         K_y, K_mpc = self.opt_cl_gains()
         K_x = K_mpc[:, :n_xm]
 
+        self.K_y = K_y
+        self.K_x = K_x
+
+        if Bd is None:
+            Bd = np.zeros(Bm.shape)
+            u_d = np.zeros(u.shape)
+        else:
+            if u_d.ndim == 1:
+                u_d = np.tile(u_d, (n, 1))
+                
         for i in range(n - 1):
             # Updates the output and dx
             y[i] = Cm @ x_m[i]
@@ -553,12 +574,11 @@ class System:
             u[i] = u[i] + du
 
             # Applies the control law
-            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
+            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i] + Bd @ u_d[i]
 
             # Update variables for next iteration
             dx = x_m[i]
             u[i + 1] = u[i]
-
 
         # Updates last value of y
         y[n - 1] = Cm @ x_m[n - 1]
