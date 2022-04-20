@@ -506,8 +506,16 @@ class System:
             and the key `y` contains the output.
 
         """
+        if type(x_i) is int or type(x_i) is float or type(x_i) is list:
+            x_i = np.array(x_i).reshape(1, -1)
+        elif type(x_i) is np.ndarray:
+            x_i = np.array(x_i).reshape(1, -1)
+            
         if type(r) is int or type(r) is float:
             r = r * np.ones((n, 1))
+        elif type(r) is list:
+            r = np.array(r)
+        
         if type(r) is np.ndarray and r.ndim == 1:
             r = np.tile(r, (n, 1))
             
@@ -570,8 +578,34 @@ class System:
 
 
 class ConstrainedModel:
-    """
+    """A class to hold data from a constrained system.
+    
+    Parameters
+    ----------
+    A : :class:`np.array`
+        The `A` matrix of the augmented model. An (n, n) numpy matrix.
 
+    B : :class:`np.array`
+        The `B` matrix of the augmented model. An (n, m) numpy matrix.
+
+    C : :class:`np.array`
+        The `B` matrix of the augmented model. An (q, n) numpy matrix.
+
+    n_p : :class:`int`
+        Length of prediction horizon.
+
+    n_c : :class:`int`
+        Length of the control window.
+
+    n_r : :class:`int`
+        Length of constraint window. 
+        
+    r_w : :class:`int`, :class:`float`, :class:`np.array`, :class:`list`
+        Weight of control action.
+
+    u_lim : :class:`np.array`, :class:`list`
+        Lower and upper bounds of the control signals.
+        
     """
     def __init__(self, A, B, C, n_p, n_c, n_r, r_w, u_lim):
         
@@ -663,7 +697,7 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xa, u_i, r)
 
-        du = self.qp(F_j, y, method='hild')
+        du = self.qp(F_j, y, method='quadprog')
 
         return du[:n_u]
 
@@ -756,7 +790,7 @@ class ConstrainedSystem:
         Weight of control action.
     
     """
-    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None):
+    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None, u_lim=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
         self.Am = Am
         self.Bm = Bm
@@ -764,14 +798,23 @@ class ConstrainedSystem:
 
         self.n_p = n_p
         self.n_c = n_c
+        self.n_r = n_r
 
         if type(r_w) is int or type(r_w) is float:
             r_w = np.array([r_w])
+
+        elif type(r_w) is list:
+            r_w = np.array(r_w)
+            
         self.r_w = r_w
 
-        self.n_r = n_r
+        if type(u_lim) is int or type(u_lim) is float:
+            u_lim = np.array([u_lim])
+        
+        elif type(u_lim) is list:
+            u_lim = np.array(u_lim)
 
-        u_lim = [[-180, -180, 162.5, 0], [180, 180, 162.5, 0]]
+        self.u_lim = u_lim
         
         self.constr_model = ConstrainedModel(self.A, self.B, self.C, n_p, n_c, n_r, r_w, u_lim)
         
@@ -889,8 +932,19 @@ class ConstrainedSystem:
             and the key `y` contains the output.
 
         """
+        if type(u_i) is int or type(u_i) is float or type(u_i) is list:
+            u_i = np.array(u_i)
+
+        if type(x_i) is int or type(x_i) is float or type(x_i) is list:
+            x_i = np.array(x_i).reshape(1, -1)
+        elif type(x_i) is np.ndarray:
+            x_i = np.array(x_i).reshape(1, -1)
+            
         if type(r) is int or type(r) is float:
             r = r * np.ones((n, 1))
+        elif type(r) is list:
+            r = np.array(r)
+        
         if type(r) is np.ndarray and r.ndim == 1:
             r = np.tile(r, (n, 1))
             
