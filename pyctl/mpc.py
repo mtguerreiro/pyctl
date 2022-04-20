@@ -1,6 +1,7 @@
 import numpy as np
 import pyctl as ctl
-
+import qpsolvers as qps
+import pydsim.qp as pydqp
 
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
@@ -111,27 +112,11 @@ def opt(A, B, C, x_i, r, r_w, n_p, n_c):
 
     x_i = x_i.reshape(-1, 1)
 
-    R_s_bar = np.tile(np.eye(q), (n_p, 1))
-    # R_s = np.zeros((n_p * q, 1))
-    # for i in range(n_p):
-    #    R_s[ (q * i) : (q * (i + 1)), 0] = r
+    R_s_bar = reference_matrix(q, n_p)
 
-    R = np.zeros((n_c * m, n_c * m))
-    for i in range(n_c):
-        R[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
-        
-    F = np.zeros((n_p * q, A.shape[1]))
-    F[:q, :] = C @ A
-    for i in range(1, n_p):
-        F[q * i : q * (i + 1), :] = F[q * (i - 1) : q * i, :] @ A
+    R = control_weighting_matrix(r_w, n_c)
 
-    Phi = np.zeros((n_p * q, n_c * m))
-    Phi[:q, :m] = C @ B
-    for i in range(1, n_p):
-        A_p = np.linalg.matrix_power(A, i)
-        Phi[ (q * i) : ( q * (i + 1) ), :m] = C @ A_p @ B
-        for j in range(n_c - 1):
-            Phi[ (q * i) : ( q * (i + 1) ), m * (j + 1) : m * (j + 2)] = Phi[ ( q * (i - 1) ) : (q * i), m * j : m * (j + 1)]
+    F, Phi = opt_matrices(A, B, C, n_p, n_c)
 
     Phi_t = Phi.T
     DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s_bar - F @ x_i)
@@ -249,6 +234,62 @@ def opt_matrices(A, B, C, n_p, n_c):
     return (F, Phi)
 
 
+def control_weighting_matrix(r_w, n_c):
+    r"""Computes the :math:`\bar{R}` matrix.
+
+    Parameters
+    ----------
+    r_w : :class:`int`, :class:`list`, :class:`np.array`
+        The weighting coefficients, as a 1-d numpy array, an integer or a
+        list.
+
+    n_c : :class:`int`
+        Length of the control window.
+
+    Returns
+    -------
+    R_bar : :class:`np.array`
+        An (n_c * m, n_c * m) matrix, where `m` is the number of coefficients
+        (system input signals).
+    
+    """
+    if type(r_w) is int or type(r_w) is float:
+        r_w = np.array([r_w])
+    elif type(r_w) is list:
+        r_w = np.array(r_w)
+
+    m = r_w.shape[0]
+    
+    R_bar = np.zeros((n_c * m, n_c * m))
+    for i in range(n_c):
+        R_bar[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
+
+    return R_bar
+
+
+def reference_matrix(q, n_p):
+    r"""Computes the :math:`\bar{R_s}` matrix.
+
+    Parameters
+    ----------
+    q : :class:`int`
+        Number of references (system outputs).
+        
+    n_p : :class:`int`
+        Length of prediction horizon.
+
+    Returns
+    -------
+    R_s_bar : :class:`np.array`
+        An (q, n_p * q) matrix, where `q` is the number of references
+        (system outputs).
+    
+    """
+    R_s_bar = np.tile(np.eye(q), (n_p, 1))
+
+    return R_s_bar
+
+
 class System:
     """A class to create a discrete-time system for model predictive control
     simulations.
@@ -270,7 +311,7 @@ class System:
 
     n_c : :class:`NoneType`, :class:`int`
         Length of control window. Can be set later. By default, it is `None`.
-
+        
     r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weight of control action. Can be set later. By default, it is `None`.
 
@@ -300,11 +341,11 @@ class System:
     n_c : :class:`NoneType`, :class:`int`
         Size of control window.
 
-    r_w : :class:`NoneType`, :class:`int`
+    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weight of control action.
     
     """
-    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, r_w=None):
+    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
         self.Am = Am
         self.Bm = Bm
@@ -316,6 +357,8 @@ class System:
         if type(r_w) is int or type(r_w) is float:
             r_w = np.array([r_w])
         self.r_w = r_w
+
+        self.n_r = n_r
         
 
     def model_matrices(self):
@@ -382,69 +425,6 @@ class System:
         self.r_w = r_w
 
     
-    def opt(self, x_i, r, r_w, n_p, n_c):
-        r"""Obtains the control vector minimizing the cost function.
-
-        Parameters
-        ----------
-        x_i : :class:`np.array`
-            Initial conditions of the augmented states. An (n, 1) numpy matrix.
-
-        r : :class:`int`, :class:`float`
-            The set-point signal.
-            
-        r_w : :class:`int`, :class:`float`
-            Weight of the control action.
-
-        n_p : :class:`int`
-            Length of prediction horizon.
-
-        n_c : :class:`int`
-            Length of the control window.
-        
-        Returns
-        -------
-        :class:`np.array`
-            An (n_c, 1) numpy matrix containing the optimal control values.
-        
-        """
-        A, B, C = self.aug_matrices()
-        DU = ctl.mpc.opt(A, B, C, x_i, r, r_w, n_p, n_c) 
-
-        return DU
-
-    
-    def predict_horizon(self, u, x_i, n_p):
-        r"""Predicts the states and the output based on the control actions and
-        based on the given horizon.
-
-        Parameters
-        ----------
-        u : :class:`np.array`
-            The control values. An (n_c, 1) numpy matrix, where `n_c` is the
-            number of control actions.
-
-        x_i : :class:`np.array`
-            Initial conditions of the augmented states. An (n, 1) numpy matrix.
-
-        n_p : :class:`int`
-            Length of prediction horizon. Should be equal or greater than the
-            number of control actions.
-
-        Returns
-        -------
-        (x, y) : :class:`tuple`
-            A tuple containing two numpy matrices. The first matrix contains
-            the state values `x` and the second matrix contains the output
-            `y`.
-        
-        """
-        A, B, C = self.aug_matrices()
-        x, y = ctl.mpc.predict_horizon(A, B, C, u, x_ki, n_p)
-
-        return (x, y)
-
-    
     def opt_cl_gains(self):
         r"""Computes the optimum gains :math:`K_y` and :math:`K_{mpc}`.
 
@@ -475,11 +455,9 @@ class System:
         else:
             q = C.shape[0]
 
-        R_s_bar = np.tile(np.eye(q), (n_p, 1))
+        R_s_bar = reference_matrix(q, n_p)
 
-        R = np.zeros((n_c * m, n_c * m))
-        for i in range(n_c):
-            R[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
+        R = control_weighting_matrix(r_w, n_c)
 
         F, Phi = ctl.mpc.opt_matrices(A, B, C, n_p, n_c)
         Phi_t = Phi.T
@@ -489,7 +467,7 @@ class System:
         K_y = K @ R_s_bar
 
         return (K_y[:m], K_mpc[:m, :])
-
+                
 
     def dmpc(self, x_i, u_i, r, n, Bd=None, u_d=None):
         """Simulates the MPC closed-loop system.
@@ -579,6 +557,381 @@ class System:
             # Update variables for next iteration
             dx = x_m[i]
             u[i + 1] = u[i]
+
+        # Updates last value of y
+        y[n - 1] = Cm @ x_m[n - 1]
+
+        results = {}
+        results['u'] = u
+        results['x_m'] = x_m
+        results['y'] = y
+
+        return results
+
+
+class ConstrainedModel:
+    """
+
+    """
+    def __init__(self, A, B, C, n_p, n_c, n_r, r_w, u_lim):
+        
+        self.A, self.B, self.C = A, B, C
+        
+        self.n_p, self.n_c, self.n_r = n_p, n_c, n_r
+        self.r_w = r_w 
+
+        if type(r_w) is int or type(r_w) is float:
+            r_w = np.array([r_w])
+        elif type(r_w) is list:
+            r_w = np.array(r_w)
+
+        if type(u_lim) is int or type(u_lim) is float:
+            u_lim = np.array([u_lim])
+        elif type(u_lim) is list:
+            u_lim = np.array(u_lim)
+
+        self.u_lim = u_lim
+
+        self.const_matrices()
+    
+
+    def const_matrices(self):
+        
+        A, B, C = self.A, self.B, self.C
+        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        r_w = self.r_w
+
+        # Number of inputs
+        if B.ndim == 1:
+            m = 1
+        else:
+            m = B.shape[1]
+
+        # Number of outputs
+        if C.ndim == 1:
+            q = 1
+        else:
+            q = C.shape[0]
+        
+        R_bar = control_weighting_matrix(r_w, n_c)
+        R_s_bar = reference_matrix(q, n_p)
+
+        self.R_bar = R_bar
+        self.R_s_bar = R_s_bar
+
+        Ml = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
+        
+        
+        M = np.concatenate((-Ml, Ml))
+        self.M = M
+
+        F, Phi = opt_matrices(A, B, C, n_p, n_c)
+        self.F, self.Phi = F, Phi
+
+        E_j = Phi.T @ Phi + R_bar
+        E_j_inv = np.linalg.inv(E_j)
+        self.E_j, self.E_j_inv = E_j, E_j_inv
+        
+
+    def dyn_matrices(self, xa, u_i, r):
+
+        n_r = self.n_r
+        
+        F, Phi = self.F, self.Phi
+
+        R_s_bar = self.R_s_bar
+       
+        u_lim = self.u_lim
+
+        F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa)
+
+        # Reshape y1 and y2 to make them two column-vectors
+        u_min = -u_lim[0] + u_i
+        u_max =  u_lim[1] - u_i
+        
+        y1 = np.tile(u_min, n_r).reshape(-1, 1)
+        y2 = np.tile(u_max, n_r).reshape(-1, 1)
+        
+        y = np.concatenate((y1, y2))
+
+        return (F_j, y)
+
+
+    def opt(self, xa, u_i, r):
+
+        n_u = u_i.shape[0]
+        
+        F_j, y = self.dyn_matrices(xa, u_i, r)
+
+        du = self.qp(F_j, y, method='hild')
+
+        return du[:n_u]
+
+    
+    def qp(self, F_j, y, method='hild'):
+
+        E_j, E_j_inv = self.E_j, self.E_j_inv
+        M = self.M
+        F, Phi = self.F, self.Phi
+        
+        if method == 'hild':
+            H_j = M @ E_j_inv @ M.T
+            K_j = y + M @ E_j_inv @ F_j
+            lm, n_iters = pydqp.hild(H_j, K_j, n_iter=500, ret_n_iter=True)
+            lm = lm.reshape(-1, 1)
+            du_opt = -E_j_inv @ (F_j + M.T @ lm)
+            du_opt = du_opt.reshape(-1)
+
+        elif method == 'cvx':
+            du_opt = qps.cvxopt_solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
+
+        elif method == 'quadprog':
+            du_opt = qps.solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
+
+        else:
+            du_opt = 0
+
+        return du_opt
+
+
+class ConstrainedSystem:
+    """A class to create a discrete-time system for model predictive control
+    simulations.
+
+    Parameters
+    ----------
+    Am : :class:`np.array`
+        Model matrix :math:`A_m`. An (n, n) numpy matrix.
+
+    Bm : :class:`np.array`
+        Model matrix :math:`B_m`. An (n, m) numpy matrix.
+
+    Cm : :class:`np.array`
+        Model matrix :math:`C_m`. An (q, n) numpy matrix.
+
+    n_p : :class:`bool`, :class:`int`
+        Length of prediction horizon . Can be set later. By default, it is
+        `None`.
+
+    n_c : :class:`NoneType`, :class:`int`
+        Length of control window. Can be set later. By default, it is `None`.
+
+    n_r : :class:`NoneType`, :class:`int`
+        Length of constraint window. Can be set later. By default, it is
+        `None`.
+        
+    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weight of control action. Can be set later. By default, it is `None`.
+
+    Attributes
+    ----------
+    A : :class:`np.array`
+        Augmented model matrix :math:`A`.
+    
+    B : :class:`np.array`
+        Augmented model matrix :math:`B`.
+    
+    C : :class:`np.array`
+        Augmented model matrix :math:`C`.
+
+    Am : :class:`np.array`
+        Model matrix :math:`A_m`.
+    
+    Bm : :class:`np.array`
+        Model matrix :math:`B_m`.
+    
+    Cm : :class:`np.array`
+        Model matrix :math:`C_m`.
+    
+    n_p : :class:`bool`, :class:`int`
+        Length of prediction horizon.
+
+    n_c : :class:`NoneType`, :class:`int`
+        Size of control window.
+
+    n_r : :class:`NoneType`, :class:`int`
+        Size of constraint window.
+
+    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weight of control action.
+    
+    """
+    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None):
+        self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
+        self.Am = Am
+        self.Bm = Bm
+        self.Cm = Cm
+
+        self.n_p = n_p
+        self.n_c = n_c
+
+        if type(r_w) is int or type(r_w) is float:
+            r_w = np.array([r_w])
+        self.r_w = r_w
+
+        self.n_r = n_r
+
+        u_lim = [[-180, -180, 162.5, 0], [180, 180, 162.5, 0]]
+        
+        self.constr_model = ConstrainedModel(self.A, self.B, self.C, n_p, n_c, n_r, r_w, u_lim)
+        
+
+    def model_matrices(self):
+        r"""Helper function that returns the matrices :math:`A_m`, :math:`B_m`
+        and :math:`C_m` of the plant model.
+
+        Returns
+        -------
+        (Am, Bm, Cm) : :class:`tuple`
+            A tuple containing the three model matrices.
+        
+        """
+        return (self.Am, self.Bm, self.Cm)
+
+
+    def aug_matrices(self):
+        r"""Helper function that returns the matrices :math:`A`, :math:`B` and
+        :math:`C_m` of the augmented model.
+
+        Returns
+        -------
+        (A, B, C) : :class:`tuple`
+            A tuple containing the three matrices.
+        
+        """
+        return (self.A, self.B, self.C)
+
+
+    def set_predict_horizon(self, n_p):
+        r"""Sets the length of the predict horizon.
+
+        Parameters
+        ----------
+        n_p : :class:`int`
+            Length of prediction horizon.        
+        
+        """
+        self.n_p = n_p
+
+
+    def set_control_horizon(self, n_c):
+        r"""Sets the length of the control window.
+
+        Parameters
+        ----------
+        n_c : :class:`int`
+            Length of control window.
+        
+        """
+        self.n_c = n_c
+
+
+    def set_constraint_horizon(self, n_r):
+        r"""Sets the length of the constraint window.
+
+        Parameters
+        ----------
+        n_r : :class:`int`
+            Length of constraint window.
+        
+        """
+        self.n_r = n_r
+        
+
+    def set_r_w(self, r_w):
+        r"""Sets the weight for optimization of the control vector.
+
+        Parameters
+        ----------
+        r_w : :class:`int`, :class:`float`, :class:`np.array`
+            Weight.        
+        
+        """
+        if type(r_w) is int or type(r_w) is float:
+            r_w = np.array([r_w])
+        self.r_w = r_w
+    
+
+    def dmpc(self, x_i, u_i, r, n, Bd=None, u_d=None):
+        """Simulates the MPC closed-loop system.
+
+        Parameters
+        ----------
+        x_i : :class:`np.array`
+            The initial conditions. Should be an (n_x, 1) numpy matrix, where
+            `n_x` is the number of states of the model.
+
+        u_i : :class:`np.array`
+            The value of the control action at u(-1).
+
+        r : :class:`float`, :class:`np.array`
+            The set-point.
+
+        n : :class:`int`
+            Length of simulation.
+
+        Bd : :class:`np.array`
+            An (p, p) numpy matrix, where `p` is the number of disturbances.
+            By default, it is `None`.
+
+        u_d : :class:`np.array`
+            An (p, 1) or (p, n) numpy matrix, where `p` is the number of
+            disturbances. If the second dimension is 1, the disturbance is
+            considered to be constant during the entire period. Otherwise,
+            it must contain `n` values to be used during the entire
+            simulation. By default, it is `None`.
+
+        Returns
+        -------
+        data : :class:`dict`
+            A dictionary containing the simulation results. The key `u`
+            contains the control actions, the key `x_m` contains the states
+            and the key `y` contains the output.
+
+        """
+        if type(r) is int or type(r) is float:
+            r = r * np.ones((n, 1))
+        if type(r) is np.ndarray and r.ndim == 1:
+            r = np.tile(r, (n, 1))
+            
+        Am, Bm, Cm = self.model_matrices()
+        A, B, C = self.aug_matrices()
+
+        n_xm = Am.shape[0]
+        n_x = A.shape[0]
+        n_y = C.shape[0]
+        n_u = B.shape[1]
+        
+        x_m = np.zeros((n, n_xm))
+        x = np.zeros((n, n_x))
+        y = np.zeros((n, n_y))
+
+        u = np.zeros((n, n_u))
+
+        x_m[0] = x_i[:, 0]
+        dx = x_i[:, 1]
+        u[0] = u_i
+
+        du = np.zeros((B.shape[1], 1)).reshape(-1) + u_i.reshape(-1)
+        xa = np.zeros((A.shape[0], 1))
+        for i in range(n - 1):
+            # Updates the output and dx
+            y[i] = Cm @ x_m[i]
+            dx = x_m[i] - dx
+            xa[:n_xm, 0] = dx
+            xa[n_xm:, 0] = y[i]
+
+            du = self.constr_model.opt(xa, u[i], r[i])
+            u[i] = u[i] + du
+            
+            # Applies the control law
+            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
+
+            # Update variables for next iteration
+            dx = x_m[i]
+            u[i + 1] = u[i]
+
+            #print('\n---\n')
 
         # Updates last value of y
         y[n - 1] = Cm @ x_m[n - 1]
