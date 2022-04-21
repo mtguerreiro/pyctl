@@ -582,14 +582,14 @@ class ConstrainedModel:
     
     Parameters
     ----------
-    A : :class:`np.array`
-        The `A` matrix of the augmented model. An (n, n) numpy matrix.
+    Am : :class:`np.array`
+        Model matrix :math:`A_m`. An (n, n) numpy matrix.
 
-    B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, m) numpy matrix.
+    Bm : :class:`np.array`
+        Model matrix :math:`B_m`. An (n, m) numpy matrix.
 
-    C : :class:`np.array`
-        The `B` matrix of the augmented model. An (q, n) numpy matrix.
+    Cm : :class:`np.array`
+        Model matrix :math:`C_m`. An (q, n) numpy matrix.
 
     n_p : :class:`int`
         Length of prediction horizon.
@@ -607,9 +607,10 @@ class ConstrainedModel:
         Lower and upper bounds of the control signals.
         
     """
-    def __init__(self, A, B, C, n_p, n_c, n_r, r_w, u_lim):
-        
-        self.A, self.B, self.C = A, B, C
+    def __init__(self, Am, Bm, Cm, n_p, n_c, n_r, r_w, x_lim, u_lim):
+
+        self.Am, self.Bm, self.Cm = Am, Bm, Cm
+        self.A, self.B, self.C = aug(Am, Bm, Cm)
         
         self.n_p, self.n_c, self.n_r = n_p, n_c, n_r
         self.r_w = r_w 
@@ -624,7 +625,13 @@ class ConstrainedModel:
         elif type(u_lim) is list:
             u_lim = np.array(u_lim)
 
+        if type(x_lim) is int or type(x_lim) is float:
+            x_lim = np.array([x_lim])
+        elif type(x_lim) is list:
+            x_lim = np.array(x_lim)
+            
         self.u_lim = u_lim
+        self.x_lim = x_lim
 
         self.const_matrices()
     
@@ -632,6 +639,7 @@ class ConstrainedModel:
     def const_matrices(self):
         
         A, B, C = self.A, self.B, self.C
+        Am, Bm, Cm = self.Am, self.Bm, self.Cm
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
         r_w = self.r_w
 
@@ -653,21 +661,29 @@ class ConstrainedModel:
         self.R_bar = R_bar
         self.R_s_bar = R_s_bar
 
-        Ml = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
-        
-        
-        M = np.concatenate((-Ml, Ml))
-        self.M = M
+        # Control inequality constraints
+        M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
+        M_u = np.concatenate((-M_aux, M_aux))
+        #self.M = M_u
 
+        # State inequality constraints
+        C_x = np.eye(Am.shape[0])
+        F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_c, n_r)
+        self.F_x, self.Phi_x = F_x, Phi_x
+        M_x = np.concatenate((-Phi_x, Phi_x))
+
+        self.M = np.concatenate((M_u, M_x))
+
+        # QP matrices
         F, Phi = opt_matrices(A, B, C, n_p, n_c)
         self.F, self.Phi = F, Phi
 
         E_j = Phi.T @ Phi + R_bar
         E_j_inv = np.linalg.inv(E_j)
         self.E_j, self.E_j_inv = E_j, E_j_inv
-        
 
-    def dyn_matrices(self, xa, u_i, r):
+
+    def dyn_matrices(self, xm, dx, xa, u_i, r):
 
         n_r = self.n_r
         
@@ -676,28 +692,28 @@ class ConstrainedModel:
         R_s_bar = self.R_s_bar
        
         u_lim = self.u_lim
+        x_lim = self.x_lim
 
-        F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa)
+        F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+        
+        u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
+        u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
 
-        # Reshape y1 and y2 to make them two column-vectors
-        u_min = -u_lim[0] + u_i
-        u_max =  u_lim[1] - u_i
+        x_min = np.tile(-x_lim[0] + xm, n_r).reshape(-1, 1) + self.F_x @ dx.reshape(-1, 1)
+        x_max = np.tile( x_lim[1] - xm, n_r).reshape(-1, 1) - self.F_x @ dx.reshape(-1, 1)
         
-        y1 = np.tile(u_min, n_r).reshape(-1, 1)
-        y2 = np.tile(u_max, n_r).reshape(-1, 1)
-        
-        y = np.concatenate((y1, y2))
+        y = np.concatenate((u_min, u_max, x_min, x_max))
 
         return (F_j, y)
 
 
-    def opt(self, xa, u_i, r):
+    def opt(self, xm, dx, xa, u_i, r):
 
         n_u = u_i.shape[0]
         
-        F_j, y = self.dyn_matrices(xa, u_i, r)
+        F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du = self.qp(F_j, y, method='quadprog')
+        du = self.qp(F_j, y, method='cvx')
 
         return du[:n_u]
 
@@ -790,7 +806,7 @@ class ConstrainedSystem:
         Weight of control action.
     
     """
-    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None, u_lim=None):
+    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None, x_lim=None, u_lim=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
         self.Am = Am
         self.Bm = Bm
@@ -815,8 +831,9 @@ class ConstrainedSystem:
             u_lim = np.array(u_lim)
 
         self.u_lim = u_lim
+        self.x_lim = x_lim
         
-        self.constr_model = ConstrainedModel(self.A, self.B, self.C, n_p, n_c, n_r, r_w, u_lim)
+        self.constr_model = ConstrainedModel(Am, Bm, Cm, n_p, n_c, n_r, r_w, x_lim, u_lim)
         
 
     def model_matrices(self):
@@ -975,7 +992,7 @@ class ConstrainedSystem:
             xa[:n_xm, 0] = dx
             xa[n_xm:, 0] = y[i]
 
-            du = self.constr_model.opt(xa, u[i], r[i])
+            du = self.constr_model.opt(x_m[i], dx, xa, u[i], r[i])
             u[i] = u[i] + du
             
             # Applies the control law

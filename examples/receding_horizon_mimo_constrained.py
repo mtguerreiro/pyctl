@@ -26,13 +26,14 @@ fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.0, 0.0, 10.0, 10.0]
-n_p = 20
+r_w = [0.0005, 0.0005, 100.0, 100.0]
+n_p = 10
 n_c = 10
-n_r = 5
+n_r = 10
 
 # Constraints
-u_lim = [[-200, -200, 162.5, 0], [200, 200, 162.5, 0]]
+u_lim = [[-250, -250, 162.5, 0], [250, 250, 162.5, 0]]
+x_lim = [[-200, -200, -15, -15, -10000, -10000], [200, 200, 15, 15, 10000, 10000]]
 #I_max = 10
 
 # --- System ---
@@ -53,13 +54,13 @@ Bm = np.array([[0,      0,      1/Lg,   0],
 Cm = np.array([[1, 0, 0, 0, 0, 0],
                [0, 1, 0, 0, 0, 0]])
 
-Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='bilinear')
+Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
-n = 100
+n = 25
 
 # --- System ---
-sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, u_lim=u_lim)
+sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
         
 # --- Sim with receding horizon ---
 data = sys.dmpc(x_i, u_i, r, n)
@@ -68,14 +69,20 @@ data = sys.dmpc(x_i, u_i, r, n)
 # --- Plots ---
 t = dt * np.arange(n)
 #plt.ion()
-ax = plt.subplot(2,1,1)
+ax = plt.subplot(3,1,1)
 plt.step(t / 1e-3, data['u'], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Control')
 plt.grid()
 
-plt.subplot(2,1,2, sharex=ax)
+plt.subplot(3,1,2, sharex=ax)
 plt.step(t / 1e-3, data['y'], where='post')
+plt.xlabel('Time (ms)')
+plt.ylabel('Current')
+plt.grid()
+
+plt.subplot(3,1,3, sharex=ax)
+plt.step(t / 1e-3, data['x_m'][:,[4, 5]], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Current')
 plt.grid()
