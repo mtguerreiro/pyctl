@@ -668,7 +668,7 @@ class ConstrainedModel:
 
         # State inequality constraints
         C_x = np.eye(Am.shape[0])
-        F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_c, n_r)
+        F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
         self.F_x, self.Phi_x = F_x, Phi_x
         M_x = np.concatenate((-Phi_x, Phi_x))
 
