@@ -644,13 +644,7 @@ class ConstrainedModel:
         r_w = self.r_w
 
         x_lim = self.x_lim
-##        x_lim_new = [[], []]
-##
-##        n_state_ineq = 0
-##
-##        for i in range(len(x_lim[0])):
-##            if x_lim[0] is not None:
-##                n_state_ineq = n_state_ineq + 1
+        u_lim = self.u_lim
                 
         # Number of inputs
         if B.ndim == 1:
@@ -670,39 +664,54 @@ class ConstrainedModel:
         self.R_bar = R_bar
         self.R_s_bar = R_s_bar
 
-        # Control inequality constraints
-        M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
-        M_u = np.concatenate((-M_aux, M_aux))
-        #self.M = M_u
+        # Creates left hand-side inequality constraint, starting first with
+        # control inequality constraints
+        M = []
+        if u_lim is not None:
+            M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
+            M_u = np.concatenate((-M_aux, M_aux))
+            M = M_u
 
-        # State inequality constraints
-        #C_x = np.eye(Am.shape[0])
-        n_state_ineq = 0
-        x_lim_new = [[], []]
-        C_x = []
-        for i, x_i in enumerate(x_lim[0]):
-            if x_i is not None:
-                x_lim_new[0].append(x_lim[0][i])
-                x_lim_new[1].append(x_lim[1][i])
-                n_state_ineq = n_state_ineq + 1
-                cx = np.zeros((1, Am.shape[0]))
-                cx[0, i] = 1
-                if C_x == []:
-                    C_x = cx
-                else:
-                    C_x = np.concatenate((C_x, cx))
-        F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
-        self.F_x, self.Phi_x = F_x, Phi_x
-        self.C_x = C_x
-        self.x_lim_new = np.array(x_lim_new)
-        M_x = np.concatenate((-Phi_x, Phi_x))
+        # Now, the state inequality constraints
+        if x_lim is not None:
+            n_state_ineq = 0
+            x_lim_new = [[], []]
+            C_x = []
+            
+            for i, x_i in enumerate(x_lim[0]):
+                if x_i is not None:
+                    x_lim_new[0].append(x_lim[0][i])
+                    x_lim_new[1].append(x_lim[1][i])
+                    
+                    n_state_ineq = n_state_ineq + 1
+                    
+                    cx = np.zeros((1, Am.shape[0]))
+                    cx[0, i] = 1
+                    
+                    if C_x == []:
+                        C_x = cx
+                    else:
+                        C_x = np.concatenate((C_x, cx))
+                        
+            F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
+            self.F_x, self.Phi_x = F_x, Phi_x
+            self.C_x = C_x
+            
+            self.x_lim = np.array(x_lim_new)
+            
+            M_x = np.concatenate((-Phi_x, Phi_x))
+            
+            if M == []:
+                M = M_x
+            else:
+                M = np.concatenate((M, M_x))
 
-        print(F_x.shape)
-        print(Phi_x.shape)
-        print(C_x.shape)
-        print('\n')
-
-        self.M = np.concatenate((M_u, M_x))
+        # If there were no constraints, creates an empty matrix
+        if M == []:
+            M = np.zeros((1, m * n_r ))
+        
+        # Saves M matrix only after creating all constraints
+        self.M = M
 
         # QP matrices
         F, Phi = opt_matrices(A, B, C, n_p, n_c)
@@ -716,28 +725,35 @@ class ConstrainedModel:
     def dyn_matrices(self, xm, dx, xa, u_i, r):
 
         n_r = self.n_r
-        
         F, Phi = self.F, self.Phi
-
-        C_x = self.C_x
-
         R_s_bar = self.R_s_bar
        
         u_lim = self.u_lim
-        x_lim = self.x_lim_new
+        x_lim = self.x_lim
 
         F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
-        
-        u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
-        u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
 
-        #print((self.F_x @ dx.reshape(-1, 1)).shape)
-        #print((C_x @ xm).reshape(-1, 1).shape)
-
-        x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + self.F_x @ dx.reshape(-1, 1)
-        x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - self.F_x @ dx.reshape(-1, 1)
+        y = []
         
-        y = np.concatenate((u_min, u_max, x_min, x_max))
+        if u_lim is not None:
+            u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
+            u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
+
+            y = np.concatenate((u_min, u_max))
+        
+        if x_lim is not None:
+            C_x = self.C_x
+            F_x = self.F_x
+            x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + F_x @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - F_x @ dx.reshape(-1, 1)
+
+            if y == []:
+                y = np.concatenate((x_min, x_max))
+            else:
+                y = np.concatenate((y, x_min, x_max))
+
+        if y == []:
+            y = np.zeros(1)
 
         return (F_j, y)
 
@@ -758,9 +774,6 @@ class ConstrainedModel:
         E_j, E_j_inv = self.E_j, self.E_j_inv
         M = self.M
         F, Phi = self.F, self.Phi
-
-        print(M)
-        print(y)
         
         if method == 'hild':
             H_j = M @ E_j_inv @ M.T
@@ -868,6 +881,12 @@ class ConstrainedSystem:
         elif type(u_lim) is list:
             u_lim = np.array(u_lim)
 
+        if type(x_lim) is int or type(x_lim) is float:
+            x_lim = np.array([x_lim])
+        
+        elif type(x_lim) is list:
+            x_lim = np.array(x_lim)
+            
         self.u_lim = u_lim
         self.x_lim = x_lim
         

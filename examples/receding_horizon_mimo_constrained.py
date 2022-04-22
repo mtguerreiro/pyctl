@@ -26,16 +26,15 @@ fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.00005, 0.00005, 10.0, 10.0]
-n_p = 1
-n_c = 1
-n_r = 1
-
+r_w = [0.0005, 0.0005, 10.0, 10.0]
+n_p = 20
+n_c = 20
+n_r = 20
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
 u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
-x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
+x_lim = [[None, None, -15, None, None, None], [None, None, 15, None, None, None]]
 #I_max = 10
 
 # --- System ---
@@ -59,13 +58,13 @@ Cm = np.array([[1, 0, 0, 0, 0, 0],
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
-n = 2
+n = 20
 
 # --- System ---
 #r = 10 * np.ones((n, 2))
 #r[int(n/2):, :] = [10, -10]
 sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
-        
+
 # --- Sim with receding horizon ---
 data = sys.dmpc(x_i, u_i, r, n)
 
