@@ -22,7 +22,7 @@ u_i = [0, 0, 162.5, 0]
 u_i_unc = [0, 0]
 
 # Discretization
-fs = 2.5e3
+fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
