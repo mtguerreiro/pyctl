@@ -27,15 +27,15 @@ dt = 1 / fs
 
 # Optimization parameters
 r_w = [0.00005, 0.00005, 10.0, 10.0]
-n_p = 20
-n_c = 10
-n_r = 10
+n_p = 1
+n_c = 1
+n_r = 1
 
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
 u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
-x_lim = [[None, None, -10, -10, None, None], [None, None, 10, 10, None, None]]
+x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
 #I_max = 10
 
 # --- System ---
@@ -59,7 +59,7 @@ Cm = np.array([[1, 0, 0, 0, 0, 0],
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
-n = 3
+n = 2
 
 # --- System ---
 #r = 10 * np.ones((n, 2))

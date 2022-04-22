@@ -736,7 +736,6 @@ class ConstrainedModel:
 
         x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + self.F_x @ dx.reshape(-1, 1)
         x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - self.F_x @ dx.reshape(-1, 1)
-        print(x_max)
         
         y = np.concatenate((u_min, u_max, x_min, x_max))
 
@@ -759,6 +758,9 @@ class ConstrainedModel:
         E_j, E_j_inv = self.E_j, self.E_j_inv
         M = self.M
         F, Phi = self.F, self.Phi
+
+        print(M)
+        print(y)
         
         if method == 'hild':
             H_j = M @ E_j_inv @ M.T
