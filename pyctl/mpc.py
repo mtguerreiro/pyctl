@@ -693,12 +693,14 @@ class ConstrainedModel:
                     C_x = np.concatenate((C_x, cx))
         F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
         self.F_x, self.Phi_x = F_x, Phi_x
-        self.C_x = np.tile(C_x, (n_r, 1))
+        self.C_x = C_x
         self.x_lim_new = np.array(x_lim_new)
+        M_x = np.concatenate((-Phi_x, Phi_x))
+
         print(F_x.shape)
         print(Phi_x.shape)
         print(C_x.shape)
-        M_x = np.concatenate((-Phi_x, Phi_x))
+        print('\n')
 
         self.M = np.concatenate((M_u, M_x))
 
@@ -729,11 +731,12 @@ class ConstrainedModel:
         u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
         u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
 
-        print(self.F_x.shape)
-        print(self.C_x.shape)
-        print(dx.shape)
-        x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + self.F_x @ C_x @ dx.reshape(-1, 1)
-        x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - self.F_x @ C_x @ dx.reshape(-1, 1)
+        #print((self.F_x @ dx.reshape(-1, 1)).shape)
+        #print((C_x @ xm).reshape(-1, 1).shape)
+
+        x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + self.F_x @ dx.reshape(-1, 1)
+        x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - self.F_x @ dx.reshape(-1, 1)
+        print(x_max)
         
         y = np.concatenate((u_min, u_max, x_min, x_max))
 
