@@ -2,6 +2,7 @@ import numpy as np
 import pyctl as ctl
 import qpsolvers as qps
 import pydsim.qp as pydqp
+import sys
 
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
@@ -603,6 +604,9 @@ class ConstrainedModel:
     r_w : :class:`int`, :class:`float`, :class:`np.array`, :class:`list`
         Weight of control action.
 
+    x_lim : :class:`np.array`, :class:`list`
+        Lower and upper bounds of the states.
+        
     u_lim : :class:`np.array`, :class:`list`
         Lower and upper bounds of the control signals.
         
@@ -637,7 +641,9 @@ class ConstrainedModel:
     
 
     def const_matrices(self):
-        
+        """Sets constant matrices, to be used later by the optimization.
+
+        """
         A, B, C = self.A, self.B, self.C
         Am, Bm, Cm = self.Am, self.Bm, self.Cm
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
@@ -664,7 +670,7 @@ class ConstrainedModel:
         self.R_bar = R_bar
         self.R_s_bar = R_s_bar
 
-        # Creates left hand-side inequality constraint, starting first with
+        # Creates left-hand side inequality constraint, starting first with
         # control inequality constraints
         M = []
         if u_lim is not None:
@@ -723,7 +729,9 @@ class ConstrainedModel:
 
 
     def dyn_matrices(self, xm, dx, xa, u_i, r):
+        """Sets dynamic matrices, to be used later by the optimization.
 
+        """
         n_r = self.n_r
         F, Phi = self.F, self.Phi
         R_s_bar = self.R_s_bar
@@ -733,6 +741,8 @@ class ConstrainedModel:
 
         F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
 
+        # Creates the right-hand side inequality vector, starting first with
+        # the control inequality constraints
         y = []
         
         if u_lim is not None:
@@ -740,7 +750,8 @@ class ConstrainedModel:
             u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
 
             y = np.concatenate((u_min, u_max))
-        
+
+        # Now, the state inequality constraints
         if x_lim is not None:
             C_x = self.C_x
             F_x = self.F_x
@@ -752,6 +763,7 @@ class ConstrainedModel:
             else:
                 y = np.concatenate((y, x_min, x_max))
 
+        # If there were no constraints, creates a zero vector
         if y == []:
             y = np.zeros(1)
 
@@ -764,13 +776,25 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du = self.qp(F_j, y, method='cvx')
+        du = self.qp(F_j, y, method='hild')
 
         return du[:n_u]
 
     
     def qp(self, F_j, y, method='hild'):
+        """Solver the QP problem given by:
 
+        .. :math:
+
+            J = \Delta U^T E_J \Delta U^T +  \Delta U^T F_j,
+
+        subject to:
+
+        .. :math:
+
+            M \Delta U \leq y.
+            
+        """
         E_j, E_j_inv = self.E_j, self.E_j_inv
         M = self.M
         F, Phi = self.F, self.Phi
@@ -778,10 +802,16 @@ class ConstrainedModel:
         if method == 'hild':
             H_j = M @ E_j_inv @ M.T
             K_j = y + M @ E_j_inv @ F_j
-            lm, n_iters = pydqp.hild(H_j, K_j, n_iter=500, ret_n_iter=True)
-            lm = lm.reshape(-1, 1)
-            du_opt = -E_j_inv @ (F_j + M.T @ lm)
-            du_opt = du_opt.reshape(-1)
+            self.H_j = H_j
+            self.K_j = K_j
+
+            if self.x_lim is None and self.u_lim is None:
+                du_opt = (-E_j_inv @ F_j).reshape(-1)
+            else:
+                lm, n_iters = pydqp.hild(H_j, K_j, n_iter=500, ret_n_iter=True)
+                lm = lm.reshape(-1, 1)
+                du_opt = -E_j_inv @ (F_j + M.T @ lm)
+                du_opt = du_opt.reshape(-1)
 
         elif method == 'cvx':
             du_opt = qps.cvxopt_solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
@@ -1059,8 +1089,6 @@ class ConstrainedSystem:
             dx = x_m[i]
             u[i + 1] = u[i]
 
-            #print('\n---\n')
-
         # Updates last value of y
         y[n - 1] = Cm @ x_m[n - 1]
 
@@ -1070,3 +1098,138 @@ class ConstrainedSystem:
         results['y'] = y
 
         return results
+
+
+    def export(self, file='.'):
+
+        def np_array_to_c(arr, arr_name):
+
+            if arr.ndim == 1:
+                n = arr.shape[0]
+                m = 1
+            else:
+                if (arr.shape[0] == 1) or (arr.shape[1] == 1):
+                    arr = arr.flatten()
+                    n = arr.shape[0]
+                    m = 1
+                else:
+                    n, m = arr.shape
+
+            arr_str = np.array2string(arr, separator=',')
+            arr_str = arr_str.replace('[', '{')
+            arr_str = arr_str.replace(']', '}')
+
+            if m == 1:
+                arr_str = '{:}[{:}] = {:};'.format(arr_name, n, arr_str)
+            else:
+                arr_str = '{:}[{:}][{:}] = {:};'.format(arr_name, n, m, arr_str)
+
+            return arr_str
+    
+        #np.set_printoptions(floatmode='unique')
+        np.set_printoptions(threshold=sys.maxsize)
+
+        n_u, n_y = self.constr_model.Bm.shape[1], self.constr_model.Cm.shape[0]
+        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        u_lim, x_lim = self.constr_model.u_lim, self.constr_model.x_lim
+
+        Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
+        Fj2 = self.constr_model.Phi.T @ self.constr_model.F
+
+        Kj1 = self.constr_model.M @ self.constr_model.E_j_inv
+
+        Fxp = self.constr_model.F_x
+
+        Ej = self.constr_model.E_j
+
+        M = self.constr_model.M
+
+        Hj = np.zeros(self.constr_model.H_j.shape, dtype=self.constr_model.H_j.dtype)
+        Hj[:] = self.constr_model.H_j[:]
+        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+
+        DU1 = (-self.constr_model.E_j_inv)[0, :]
+        DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[0, :]
+        n_lambda = DU2.shape[0]
+
+        text = ''
+
+        header = '/**\n'\
+         ' * @file dmpc_buck_matrices.h\n'\
+         ' * @brief Header with data to run the DMPC algorithm for a buck converter.\n'\
+         ' *\n'\
+         ' * This file is generated automatically and should not be modified.\n'\
+         ' *\n'\
+         ' * The Hj matrix is already generated by flipping the sign and inverting its\n'\
+         ' * diagonal elements, so that Hildreth\'s algorithm does not require any \n'\
+         ' * divisions.\n'\
+         ' *\n'\
+         ' *  Originally created on: 22.04.2022\n'\
+         ' *      Author: mguerreiro\n'\
+         ' */\n'
+        
+        text = text + header
+
+        def_guard = '\n#ifndef DMPC_INVERTER_MATRICES_H_\n'\
+                    '#define DMPC_INVERTER_MATRICES_H_\n'
+        text = text + def_guard
+
+        defines = '\n/* Prediction, control and restriction horizon */\n'\
+                  '#define DMPC_INVERTER_CONFIG_NP\t\t\t{:}\n'.format(n_p)+\
+                  '#define DMPC_INVERTER_CONFIG_NC\t\t\t{:}\n'.format(n_c)+\
+                  '#define DMPC_INVERTER_CONFIG_NR\t\t\t{:}\n'.format(n_r)+\
+                  '#define DMPC_INVERTER_CONFIG_NLAMBDA\t{:}\n'.format(n_lambda)+\
+                  '\n\n/* Number of inputs and outputs */\n'\
+                  '#define DMPC_INVERTER_CONFIG_NU\t\t\t{:}\n'.format(n_u)+\
+                  '#define DMPC_INVERTER_CONFIG_NY\t\t\t{:}\n'.format(n_y)
+        text = text + defines
+
+
+        constraints = '\n/* Constraints */\n'\
+                      '#define DMPC_INVERTER_CONFIG_IL_MIN\t\t{:}\n'.format(x_lim[0])+\
+                      '#define DMPC_INVERTER_CONFIG_IL_MAX\t\t{:}\n'.format(x_lim[1])+\
+                      '#define DMPC_INVERTER_CONFIG_U_MIN\t\t{:}\n'.format(u_lim[0])+\
+                      '#define DMPC_INVERTER_CONFIG_U_MAX\t\t{:}\n'.format(u_lim[1])
+        text = text + constraints
+
+        matrices = '\n/*\n * Matrices for QP solvers \n'\
+                   ' *\n'\
+                   ' * The matrices were generated considering the following problem:\n'\
+                   ' *\n'\
+                   ' * min (1/2) * DU\' * Ej * DU + DU\' * Fj\n'\
+                   ' * DU\n'\
+                   ' *\n'\
+                   ' * s.t. M * DU <= gam\n'\
+                   ' *\n'\
+                   ' * The (1/2) term in from of DU\' * Ej * DU needs to be considered in the QP\n'\
+                   ' * solver selected, or the solution will appear to be inconsistent.\n'\
+                   ' * Note that the Fj and gam matrices are usually updated online, while Ej\n'\
+                   ' * and M are static.\n'\
+                   ' */\n'
+        ej = np_array_to_c(Ej, 'float Ej') + '\n\n'
+        fj = 'float Fj[{:}];\n\n'.format(n_c)
+        m = np_array_to_c(M, 'float M') + '\n\n'
+        gam = 'float gam[{:}];\n'.format(n_lambda)
+        text = text + matrices + ej + fj + m + gam
+        
+        matrices = '\n /* Matrices for Hildreth\'s QP procedure */\n'
+        fj1 = np_array_to_c(Fj1, 'float Fj_1') + '\n\n'
+        fj2 = np_array_to_c(Fj2, 'float Fj_2') + '\n\n'
+        fxp = np_array_to_c(Fxp, 'float Fx') + '\n\n'
+        kj1 = np_array_to_c(Kj1, 'float Kj_1') + '\n\n'
+        hj = np_array_to_c(Hj, 'float Hj') + '\n\n'
+        du1 = np_array_to_c(DU1, 'float DU_1') + '\n\n'
+        du2 = np_array_to_c(DU2, 'float DU_2') + '\n\n'
+        text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
+
+        def_guard_end = '\n#endif /* DMPC_INVERTER_MATRICES_H_ */\n'
+        text = text + def_guard_end
+
+        if file is not None:
+            with open(file, 'w') as efile:
+                efile.write(text)
+                
+        print(text)
+
+        np.set_printoptions(threshold=1000)
+        #np.set_printoptions(floatmode='maxprec_equal')
