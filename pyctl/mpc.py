@@ -643,6 +643,15 @@ class ConstrainedModel:
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
         r_w = self.r_w
 
+        x_lim = self.x_lim
+##        x_lim_new = [[], []]
+##
+##        n_state_ineq = 0
+##
+##        for i in range(len(x_lim[0])):
+##            if x_lim[0] is not None:
+##                n_state_ineq = n_state_ineq + 1
+                
         # Number of inputs
         if B.ndim == 1:
             m = 1
@@ -667,9 +676,28 @@ class ConstrainedModel:
         #self.M = M_u
 
         # State inequality constraints
-        C_x = np.eye(Am.shape[0])
+        #C_x = np.eye(Am.shape[0])
+        n_state_ineq = 0
+        x_lim_new = [[], []]
+        C_x = []
+        for i, x_i in enumerate(x_lim[0]):
+            if x_i is not None:
+                x_lim_new[0].append(x_lim[0][i])
+                x_lim_new[1].append(x_lim[1][i])
+                n_state_ineq = n_state_ineq + 1
+                cx = np.zeros((1, Am.shape[0]))
+                cx[0, i] = 1
+                if C_x == []:
+                    C_x = cx
+                else:
+                    C_x = np.concatenate((C_x, cx))
         F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
         self.F_x, self.Phi_x = F_x, Phi_x
+        self.C_x = np.tile(C_x, (n_r, 1))
+        self.x_lim_new = np.array(x_lim_new)
+        print(F_x.shape)
+        print(Phi_x.shape)
+        print(C_x.shape)
         M_x = np.concatenate((-Phi_x, Phi_x))
 
         self.M = np.concatenate((M_u, M_x))
@@ -689,18 +717,23 @@ class ConstrainedModel:
         
         F, Phi = self.F, self.Phi
 
+        C_x = self.C_x
+
         R_s_bar = self.R_s_bar
        
         u_lim = self.u_lim
-        x_lim = self.x_lim
+        x_lim = self.x_lim_new
 
         F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
         
         u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
         u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
 
-        x_min = np.tile(-x_lim[0] + xm, n_r).reshape(-1, 1) + self.F_x @ dx.reshape(-1, 1)
-        x_max = np.tile( x_lim[1] - xm, n_r).reshape(-1, 1) - self.F_x @ dx.reshape(-1, 1)
+        print(self.F_x.shape)
+        print(self.C_x.shape)
+        print(dx.shape)
+        x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + self.F_x @ C_x @ dx.reshape(-1, 1)
+        x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - self.F_x @ C_x @ dx.reshape(-1, 1)
         
         y = np.concatenate((u_min, u_max, x_min, x_max))
 

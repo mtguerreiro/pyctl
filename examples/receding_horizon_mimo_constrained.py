@@ -22,18 +22,20 @@ u_i = [0, 0, 162.5, 0]
 u_i_unc = [0, 0]
 
 # Discretization
-fs = 5e3
+fs = 2.5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.0005, 0.0005, 100.0, 100.0]
-n_p = 10
+r_w = [0.005, 0.005, 10.0, 10.0]
+n_p = 20
 n_c = 10
 n_r = 10
 
 # Constraints
-u_lim = [[-250, -250, 162.5, 0], [250, 250, 162.5, 0]]
-x_lim = [[-200, -200, -15, -15, -10000, -10000], [200, 200, 15, 15, 10000, 10000]]
+V_dc = 650
+V_max = V_dc / np.sqrt(3)
+u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
+x_lim = [[None, None, -15, -15, -10000, -10000], [None, None, 15, 15, 10000, 10000]]
 #I_max = 10
 
 # --- System ---
@@ -57,9 +59,11 @@ Cm = np.array([[1, 0, 0, 0, 0, 0],
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
-n = 25
+n = 100
 
 # --- System ---
+r = -10 * np.ones((n, 2))
+r[int(n/2):, :] = [10, 10]
 sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
         
 # --- Sim with receding horizon ---
@@ -82,7 +86,7 @@ plt.ylabel('Current')
 plt.grid()
 
 plt.subplot(3,1,3, sharex=ax)
-plt.step(t / 1e-3, data['x_m'][:,[4, 5]], where='post')
+plt.step(t / 1e-3, data['x_m'][:,[2, 3]], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Current')
 plt.grid()
