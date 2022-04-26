@@ -1148,9 +1148,9 @@ class ConstrainedSystem:
         Hj[:] = self.constr_model.H_j[:]
         Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
 
-        DU1 = (-self.constr_model.E_j_inv)[0, :]
-        DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[0, :]
-        n_lambda = DU2.shape[0]
+        DU1 = (-self.constr_model.E_j_inv)[:n_u, :]
+        DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[:n_u, :]
+        n_lambda = DU2.shape[1]
 
         text = ''
 
@@ -1186,10 +1186,10 @@ class ConstrainedSystem:
 
 
         constraints = '\n/* Constraints */\n'\
-                      '#define DMPC_INVERTER_CONFIG_IL_MIN\t\t{:}\n'.format(x_lim[0])+\
-                      '#define DMPC_INVERTER_CONFIG_IL_MAX\t\t{:}\n'.format(x_lim[1])+\
-                      '#define DMPC_INVERTER_CONFIG_U_MIN\t\t{:}\n'.format(u_lim[0])+\
-                      '#define DMPC_INVERTER_CONFIG_U_MAX\t\t{:}\n'.format(u_lim[1])
+                      #'#define DMPC_INVERTER_CONFIG_IL_MIN\t\t{:}\n'.format(x_lim[0])+\
+                      #'#define DMPC_INVERTER_CONFIG_IL_MAX\t\t{:}\n'.format(x_lim[1])+\
+                      #'#define DMPC_INVERTER_CONFIG_U_MIN\t\t{:}\n'.format(u_lim[0])+\
+                      #'#define DMPC_INVERTER_CONFIG_U_MAX\t\t{:}\n'.format(u_lim[1])
         text = text + constraints
 
         matrices = '\n/*\n * Matrices for QP solvers \n'\
@@ -1207,7 +1207,7 @@ class ConstrainedSystem:
                    ' * and M are static.\n'\
                    ' */\n'
         ej = np_array_to_c(Ej, 'float Ej') + '\n\n'
-        fj = 'float Fj[{:}];\n\n'.format(n_c)
+        fj = 'float Fj[{:}];\n\n'.format(n_c * n_u)
         m = np_array_to_c(M, 'float M') + '\n\n'
         gam = 'float gam[{:}];\n'.format(n_lambda)
         text = text + matrices + ej + fj + m + gam
@@ -1229,7 +1229,7 @@ class ConstrainedSystem:
             with open(file, 'w') as efile:
                 efile.write(text)
                 
-        print(text)
+        #print(text)
 
         np.set_printoptions(threshold=1000)
         #np.set_printoptions(floatmode='maxprec_equal')

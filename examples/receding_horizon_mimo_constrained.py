@@ -26,15 +26,15 @@ fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.0005, 0.0005, 10.0, 10.0]
-n_p = 5
-n_c = 5
-n_r = 5
+r_w = [0.00005, 0.00005, 10.0, 10.0]
+n_p = 20
+n_c = 20
+n_r = 1
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
 u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
-x_lim = [[None, None, -15, None, None, None], [None, None, 15, None, None, None]]
+x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
 #I_max = 10
 
 # --- System ---
