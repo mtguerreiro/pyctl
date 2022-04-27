@@ -26,10 +26,10 @@ fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.00005, 0.00005, 10.0, 10.0]
+r_w = [0.0005, 0.0005, 10.0, 10.0]
 n_p = 20
-n_c = 20
-n_r = 1
+n_c = 10
+n_r = 5
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
@@ -58,7 +58,7 @@ Cm = np.array([[1, 0, 0, 0, 0, 0],
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
-n = 20
+n = 30
 
 # --- System ---
 #r = 10 * np.ones((n, 2))
@@ -71,23 +71,28 @@ data = sys.dmpc(x_i, u_i, r, n)
 
 # --- Plots ---
 t = dt * np.arange(n)
-#plt.ion()
+
+plt.figure(figsize=(8,8))
+
 ax = plt.subplot(3,1,1)
 plt.step(t / 1e-3, data['u'], where='post')
 plt.xlabel('Time (ms)')
-plt.ylabel('Control')
+plt.ylabel('Voltage (V)')
+plt.title('Control signals')
 plt.grid()
 
 plt.subplot(3,1,2, sharex=ax)
-plt.step(t / 1e-3, data['y'], where='post')
+plt.step(t / 1e-3, data['x_m'][:,[2, 3]], where='post')
 plt.xlabel('Time (ms)')
-plt.ylabel('Current')
+plt.ylabel('Current (A)')
+plt.title('Inverter-side current')
 plt.grid()
 
 plt.subplot(3,1,3, sharex=ax)
-plt.step(t / 1e-3, data['x_m'][:,[2, 3]], where='post')
+plt.step(t / 1e-3, data['y'], where='post')
 plt.xlabel('Time (ms)')
-plt.ylabel('Current')
+plt.ylabel('Current (A)')
+plt.title('Grid-side current')
 plt.grid()
 
 plt.tight_layout()
