@@ -27,14 +27,17 @@ dt = 1 / fs
 
 # Optimization parameters
 r_w = [0.0005, 0.0005, 10.0, 10.0]
-n_p = 20
-n_c = 10
-n_r = 5
+n_p = 5
+n_c = 5
+n_r = 1
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
 u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
+#x_lim = [[-15, None, -15, None, None, None], [15, None, 15, None, None, None]]
+#x_lim = [[-15, -15, -15, -15, None, None], [15, 15, 15, 15, None, None]]
 x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
+#x_lim = None
 #I_max = 10
 
 # --- System ---
@@ -74,21 +77,28 @@ t = dt * np.arange(n)
 
 plt.figure(figsize=(8,8))
 
-ax = plt.subplot(3,1,1)
+ax = plt.subplot(4,1,1)
 plt.step(t / 1e-3, data['u'], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Voltage (V)')
 plt.title('Control signals')
 plt.grid()
 
-plt.subplot(3,1,2, sharex=ax)
+plt.subplot(4,1,2, sharex=ax)
 plt.step(t / 1e-3, data['x_m'][:,[2, 3]], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Current (A)')
 plt.title('Inverter-side current')
 plt.grid()
 
-plt.subplot(3,1,3, sharex=ax)
+plt.subplot(4,1,3, sharex=ax)
+plt.step(t / 1e-3, data['x_m'][:,[4, 5]], where='post')
+plt.xlabel('Time (ms)')
+plt.ylabel('Voltage (V)')
+plt.title('Filter cap. voltage')
+plt.grid()
+
+plt.subplot(4,1,4, sharex=ax)
 plt.step(t / 1e-3, data['y'], where='post')
 plt.xlabel('Time (ms)')
 plt.ylabel('Current (A)')
@@ -96,3 +106,7 @@ plt.title('Grid-side current')
 plt.grid()
 
 plt.tight_layout()
+
+
+# --- Exports file ---
+sys.export('C:/Users/mguerreiro/Documents/Projects/C/cdmpc/dmpc_inverter_matrices.h')

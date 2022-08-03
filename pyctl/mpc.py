@@ -798,13 +798,13 @@ class ConstrainedModel:
         E_j, E_j_inv = self.E_j, self.E_j_inv
         M = self.M
         F, Phi = self.F, self.Phi
-        
-        if method == 'hild':
-            H_j = M @ E_j_inv @ M.T
-            K_j = y + M @ E_j_inv @ F_j
-            self.H_j = H_j
-            self.K_j = K_j
 
+        H_j = M @ E_j_inv @ M.T
+        K_j = y + M @ E_j_inv @ F_j
+        self.H_j = H_j
+        self.K_j = K_j
+
+        if method == 'hild':
             if self.x_lim is None and self.u_lim is None:
                 du_opt = (-E_j_inv @ F_j).reshape(-1)
             else:
@@ -1129,16 +1129,21 @@ class ConstrainedSystem:
         #np.set_printoptions(floatmode='unique')
         np.set_printoptions(threshold=sys.maxsize)
 
+        n_s, n_as = self.constr_model.Am.shape[0], self.constr_model.A.shape[0]
+
         n_u, n_y = self.constr_model.Bm.shape[1], self.constr_model.Cm.shape[0]
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
-        u_lim, x_lim = self.constr_model.u_lim, self.constr_model.x_lim
+        u_lim, x_lim = self.u_lim, self.x_lim
 
         Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
         Fj2 = self.constr_model.Phi.T @ self.constr_model.F
 
         Kj1 = self.constr_model.M @ self.constr_model.E_j_inv
 
-        Fxp = self.constr_model.F_x
+        if x_lim is None:
+            Fxp = np.zeros((1,1))
+        else:
+            Fxp = self.constr_model.F_x
 
         Ej = self.constr_model.E_j
 
@@ -1155,8 +1160,9 @@ class ConstrainedSystem:
         text = ''
 
         header = '/**\n'\
-         ' * @file dmpc_buck_matrices.h\n'\
-         ' * @brief Header with data to run the DMPC algorithm for a buck converter.\n'\
+         ' * @file dmpc_inverter_matrices.h\n'\
+         ' * @brief Header with data to run the DMPC algorithm for a two-level\n'\
+         ' * inverter with LCL filter.\n'\
          ' *\n'\
          ' * This file is generated automatically and should not be modified.\n'\
          ' *\n'\
@@ -1174,24 +1180,62 @@ class ConstrainedSystem:
                     '#define DMPC_INVERTER_MATRICES_H_\n'
         text = text + def_guard
 
-        defines = '\n/* Prediction, control and restriction horizon */\n'\
-                  '#define DMPC_INVERTER_CONFIG_NP\t\t\t{:}\n'.format(n_p)+\
-                  '#define DMPC_INVERTER_CONFIG_NC\t\t\t{:}\n'.format(n_c)+\
-                  '#define DMPC_INVERTER_CONFIG_NR\t\t\t{:}\n'.format(n_r)+\
-                  '#define DMPC_INVERTER_CONFIG_NLAMBDA\t{:}\n'.format(n_lambda)+\
-                  '\n\n/* Number of inputs and outputs */\n'\
-                  '#define DMPC_INVERTER_CONFIG_NU\t\t\t{:}\n'.format(n_u)+\
-                  '#define DMPC_INVERTER_CONFIG_NY\t\t\t{:}\n'.format(n_y)
+        def_prefix = 'DIM_CONFIG'
+
+        defines = '\n/* Number of model states and augmented states */\n'\
+                  '#define {:}_NXM\t\t\t{:}\n'.format(def_prefix, n_s)+\
+                  '#define {:}_NXA\t\t\t{:}\n'.format(def_prefix, n_as)+\
+                  '\n/* Prediction, control and constraint horizon */\n'\
+                  '#define {:}_NP\t\t\t{:}\n'.format(def_prefix, n_p)+\
+                  '#define {:}_NC\t\t\t{:}\n'.format(def_prefix, n_c)+\
+                  '#define {:}_NR\t\t\t{:}\n'.format(def_prefix, n_r)+\
+                  '#define {:}_NLAMBDA\t\t{:}\n'.format(def_prefix, n_lambda)+\
+                  '\n/* Number of inputs and outputs */\n'\
+                  '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
+                  '#define {:}_NY\t\t\t{:}\n'.format(def_prefix, n_y)+\
+                  '\n/* Size of control vector */\n'\
+                  '#define {:}_NC_x_NU\t\t{:}_NC * {:}_NU\n'.format(def_prefix, def_prefix, def_prefix)
         text = text + defines
 
+        if u_lim is not None:
+            idx = []
+            for i, xi in enumerate(u_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
 
-        constraints = '\n/* Constraints */\n'\
-                      #'#define DMPC_INVERTER_CONFIG_IL_MIN\t\t{:}\n'.format(x_lim[0])+\
-                      #'#define DMPC_INVERTER_CONFIG_IL_MAX\t\t{:}\n'.format(x_lim[1])+\
-                      #'#define DMPC_INVERTER_CONFIG_U_MIN\t\t{:}\n'.format(u_lim[0])+\
-                      #'#define DMPC_INVERTER_CONFIG_U_MAX\t\t{:}\n'.format(u_lim[1])
+        u_lim_sz = idx.shape[0]
+        u_min_text = np_array_to_c(u_lim[0], 'float {:}_U_MIN'.format(def_prefix, u_lim_sz)) + '\n'
+        u_max_text = np_array_to_c(u_lim[1], 'float {:}_U_MAX'.format(def_prefix, u_lim_sz)) + '\n'
+        x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz)) + '\n'
+            
+        constraints = '\n/* Input constraints */\n'+\
+                      '#define {:}_NU_CTR\t\t{:}\n'.format(def_prefix, u_lim_sz)+\
+                      u_min_text+\
+                      u_max_text+\
+                      x_lim_idx_text
         text = text + constraints
 
+        if x_lim is not None:
+            idx = []
+            for i, xi in enumerate(x_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
+
+        x_lim_sz = idx.shape[0]
+        x_min_text = np_array_to_c(x_lim[0][idx], 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
+        x_max_text = np_array_to_c(x_lim[1][idx], 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
+        x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
+
+        constraints = '\n/* State constraints */\n'+\
+                      '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)+\
+                      x_min_text+\
+                      x_max_text+\
+                      x_lim_idx_text
+        text = text + constraints
+        
+        matrices_prefix = 'DIM_'
         matrices = '\n/*\n * Matrices for QP solvers \n'\
                    ' *\n'\
                    ' * The matrices were generated considering the following problem:\n'\
@@ -1206,20 +1250,20 @@ class ConstrainedSystem:
                    ' * Note that the Fj and gam matrices are usually updated online, while Ej\n'\
                    ' * and M are static.\n'\
                    ' */\n'
-        ej = np_array_to_c(Ej, 'float Ej') + '\n\n'
-        fj = 'float Fj[{:}];\n\n'.format(n_c * n_u)
-        m = np_array_to_c(M, 'float M') + '\n\n'
-        gam = 'float gam[{:}];\n'.format(n_lambda)
+        ej = np_array_to_c(Ej, 'float {:}Ej'.format(matrices_prefix)) + '\n\n'
+        fj = 'float {:}Fj[{:}];\n\n'.format(matrices_prefix, n_c * n_u)
+        m = np_array_to_c(M, 'float {:}M'.format(matrices_prefix)) + '\n\n'
+        gam = 'float {:}gam[{:}];\n'.format(matrices_prefix, n_lambda)
         text = text + matrices + ej + fj + m + gam
         
         matrices = '\n /* Matrices for Hildreth\'s QP procedure */\n'
-        fj1 = np_array_to_c(Fj1, 'float Fj_1') + '\n\n'
-        fj2 = np_array_to_c(Fj2, 'float Fj_2') + '\n\n'
-        fxp = np_array_to_c(Fxp, 'float Fx') + '\n\n'
-        kj1 = np_array_to_c(Kj1, 'float Kj_1') + '\n\n'
-        hj = np_array_to_c(Hj, 'float Hj') + '\n\n'
-        du1 = np_array_to_c(DU1, 'float DU_1') + '\n\n'
-        du2 = np_array_to_c(DU2, 'float DU_2') + '\n\n'
+        fj1 = np_array_to_c(Fj1, 'float {:}Fj_1'.format(matrices_prefix)) + '\n\n'
+        fj2 = np_array_to_c(Fj2, 'float {:}Fj_2'.format(matrices_prefix)) + '\n\n'
+        fxp = np_array_to_c(Fxp, 'float {:}Fx'.format(matrices_prefix)) + '\n\n'
+        kj1 = np_array_to_c(Kj1, 'float {:}Kj_1'.format(matrices_prefix)) + '\n\n'
+        hj = np_array_to_c(Hj, 'float {:}Hj'.format(matrices_prefix)) + '\n\n'
+        du1 = np_array_to_c(DU1, 'float {:}DU_1'.format(matrices_prefix)) + '\n\n'
+        du2 = np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix)) + '\n\n'
         text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
 
         def_guard_end = '\n#endif /* DMPC_INVERTER_MATRICES_H_ */\n'
