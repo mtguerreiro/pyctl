@@ -1100,7 +1100,7 @@ class ConstrainedSystem:
         return results
 
 
-    def export(self, file='.'):
+    def export(self, file='.', scaling=1.0):
 
         def np_array_to_c(arr, arr_name):
 
@@ -1182,7 +1182,9 @@ class ConstrainedSystem:
 
         def_prefix = 'DIM_CONFIG'
 
-        defines = '\n/* Number of model states and augmented states */\n'\
+        defines ='\n/* Scaling factor */\n'\
+                  '#define {:}_SCALE\t\t\t{:f}f\n'.format(def_prefix, scaling)+\
+                  '\n/* Number of model states and augmented states */\n'\
                   '#define {:}_NXM\t\t\t{:}\n'.format(def_prefix, n_s)+\
                   '#define {:}_NXA\t\t\t{:}\n'.format(def_prefix, n_as)+\
                   '\n/* Prediction, control and constraint horizon */\n'\
@@ -1205,8 +1207,8 @@ class ConstrainedSystem:
             idx = np.array(idx)
 
         u_lim_sz = idx.shape[0]
-        u_min_text = np_array_to_c(u_lim[0], 'float {:}_U_MIN'.format(def_prefix, u_lim_sz)) + '\n'
-        u_max_text = np_array_to_c(u_lim[1], 'float {:}_U_MAX'.format(def_prefix, u_lim_sz)) + '\n'
+        u_min_text = np_array_to_c(u_lim[0] / scaling, 'float {:}_U_MIN'.format(def_prefix, u_lim_sz)) + '\n'
+        u_max_text = np_array_to_c(u_lim[1] / scaling, 'float {:}_U_MAX'.format(def_prefix, u_lim_sz)) + '\n'
         x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz)) + '\n'
             
         constraints = '\n/* Input constraints */\n'+\
@@ -1224,8 +1226,8 @@ class ConstrainedSystem:
             idx = np.array(idx)
 
         x_lim_sz = idx.shape[0]
-        x_min_text = np_array_to_c(x_lim[0][idx], 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
-        x_max_text = np_array_to_c(x_lim[1][idx], 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
+        x_min_text = np_array_to_c(x_lim[0][idx] / scaling, 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
+        x_max_text = np_array_to_c(x_lim[1][idx] / scaling, 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
         x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
 
         constraints = '\n/* State constraints */\n'+\
