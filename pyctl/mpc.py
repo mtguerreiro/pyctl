@@ -1129,6 +1129,8 @@ class ConstrainedSystem:
         #np.set_printoptions(floatmode='unique')
         np.set_printoptions(threshold=sys.maxsize)
 
+        Am, Bm = self.constr_model.Am, self.constr_model.Bm
+
         n_s, n_as = self.constr_model.Am.shape[0], self.constr_model.A.shape[0]
 
         n_u, n_y = self.constr_model.Bm.shape[1], self.constr_model.Cm.shape[0]
@@ -1236,6 +1238,16 @@ class ConstrainedSystem:
                       x_max_text+\
                       x_lim_idx_text
         text = text + constraints
+
+
+        matrices_prefix = 'DIM'
+        A_text = np_array_to_c(Am, 'float {:}_A'.format(matrices_prefix)) + '\n'
+        B_text = np_array_to_c(Bm, 'float {:}_B'.format(matrices_prefix)) + '\n'
+        
+        matrices ='\n/* A and B matrices for prediction */\n'+\
+                  A_text+\
+                  B_text
+        text = text + matrices
         
         matrices_prefix = 'DIM_'
         matrices = '\n/*\n * Matrices for QP solvers \n'\
