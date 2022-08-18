@@ -17,21 +17,23 @@ r = [10, 0]
 
 # Init conditions
 x_i = [0, 0, 0, 0, 0, 0, 0, 0]
-u_i = [0, 0, 0, 0]
+u_i = [0, 0]
+
+u_i_unc = [0, 0]
 
 # Discretization
 fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = [0.0005, 0.0005, 10.0, 10.0]
+r_w = [0.0005, 0.0005]
 n_p = 5
 n_c = 5
 n_r = 1
 # Constraints
 V_dc = 650
 V_max = V_dc / np.sqrt(3)
-u_lim = [[-V_max, -V_max, 162.5, 0], [V_max, V_max, 162.5, 0]]
+u_lim = [[-V_max, -V_max], [V_max, V_max]]
 x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
 
 # --- System ---
@@ -53,15 +55,18 @@ Cm = np.array([[1, 0, 0, 0, 0, 0],
                [0, 1, 0, 0, 0, 0]])
 
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
+Bu = Bd[:, :2]
+Bv = Bd[:, 2:]
 
 # Sim points
 n = 25
 
 # --- System ---
-sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
+sys = ctl.mpc.ConstrainedSystem(Ad, Bu, Cd, n_p=n_p, n_c=n_c, n_r=n_r, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
 
 # --- Sim with receding horizon ---
-data = sys.dmpc(x_i, u_i, r, n)
+u_d = [162.5, 0]
+data = sys.dmpc(x_i, u_i, r, n, Bd=Bv, u_d=u_d)
 
 # --- Plots ---
 t = dt * np.arange(n)

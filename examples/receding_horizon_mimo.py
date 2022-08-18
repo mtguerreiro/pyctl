@@ -24,12 +24,9 @@ fs = 5e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = np.array([0.0005, 0.0005])
-n_p = 25
-n_c = 25
-
-# Constraints
-I_max = 10
+r_w = np.array([1e-6, 1e-6])
+n_p = 40
+n_c = 40
 
 # --- System ---
 Am = np.array([[0,      wg,     0,      0,      -1/Lg,  0],
@@ -49,7 +46,7 @@ Bm = np.array([[0,      0],
 Cm = np.array([[1, 0, 0, 0, 0, 0],
                [0, 1, 0, 0, 0, 0]])
 
-Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='bilinear')
+Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # Sim points
 n = 50

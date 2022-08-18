@@ -1070,6 +1070,15 @@ class ConstrainedSystem:
         dx = x_i[:, 1]
         u[0] = u_i
 
+        if Bd is None:
+            Bd = np.zeros(Bm.shape)
+            u_d = np.zeros(u.shape)
+        else:
+            if type(u_d) is int or type(u_d) is float or type(u_d) is list:
+                u_d = np.array(u_d)
+            if u_d.ndim == 1:
+                u_d = np.tile(u_d, (n, 1))
+        
         du = np.zeros((B.shape[1], 1)).reshape(-1) + u_i.reshape(-1)
         xa = np.zeros((A.shape[0], 1))
         for i in range(n - 1):
@@ -1083,7 +1092,7 @@ class ConstrainedSystem:
             u[i] = u[i] + du
             
             # Applies the control law
-            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i]
+            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i] + Bd @ u_d[i]
 
             # Update variables for next iteration
             dx = x_m[i]
@@ -1100,7 +1109,7 @@ class ConstrainedSystem:
         return results
 
 
-    def export(self, file='.', scaling=1.0):
+    def export(self, file='.', scaling=1.0, Bd=None):
 
         def np_array_to_c(arr, arr_name):
 
@@ -1242,7 +1251,11 @@ class ConstrainedSystem:
 
         matrices_prefix = 'DIM'
         A_text = np_array_to_c(Am, 'float {:}_A'.format(matrices_prefix)) + '\n'
-        B_text = np_array_to_c(Bm, 'float {:}_B'.format(matrices_prefix)) + '\n'
+        if Bd is not None:
+            B = np.concatenate((Bm, Bd), axis=1)
+        else:
+            B = Bm
+        B_text = np_array_to_c(B, 'float {:}_B'.format(matrices_prefix)) + '\n'
         
         matrices ='\n/* A and B matrices for prediction */\n'+\
                   A_text+\
