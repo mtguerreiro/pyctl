@@ -1138,11 +1138,20 @@ class ConstrainedSystem:
         #np.set_printoptions(floatmode='unique')
         np.set_printoptions(threshold=sys.maxsize)
 
-        Am, Bm = self.constr_model.Am, self.constr_model.Bm
+        Am, Bm, Cm = self.constr_model.Am, self.constr_model.Bm, self.constr_model.Cm
 
         n_s, n_as = self.constr_model.Am.shape[0], self.constr_model.A.shape[0]
 
-        n_u, n_y = self.constr_model.Bm.shape[1], self.constr_model.Cm.shape[0]
+        n_u = self.constr_model.Bm.shape[1]
+
+        if Bd is None:
+            n_d = 0
+        else:
+            n_d = Bd.shape[1]
+
+        if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
+        else: n_y = 1
+
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
         u_lim, x_lim = self.u_lim, self.x_lim
 
@@ -1171,9 +1180,8 @@ class ConstrainedSystem:
         text = ''
 
         header = '/**\n'\
-         ' * @file dmpc_inverter_matrices.h\n'\
-         ' * @brief Header with data to run the DMPC algorithm for a two-level\n'\
-         ' * inverter with LCL filter.\n'\
+         ' * @file dmpc_matrices.h\n'\
+         ' * @brief Header with data to run the DMPC algorithm.\n'\
          ' *\n'\
          ' * This file is generated automatically and should not be modified.\n'\
          ' *\n'\
@@ -1187,11 +1195,11 @@ class ConstrainedSystem:
         
         text = text + header
 
-        def_guard = '\n#ifndef DMPC_INVERTER_MATRICES_H_\n'\
-                    '#define DMPC_INVERTER_MATRICES_H_\n'
+        def_guard = '\n#ifndef DMPC_MATRICES_H_\n'\
+                    '#define DMPC_MATRICES_H_\n'
         text = text + def_guard
 
-        def_prefix = 'DIM_CONFIG'
+        def_prefix = 'DMPC_CONFIG'
 
         defines ='\n/* Scaling factor */\n'\
                   '#define {:}_SCALE\t\t\t{:f}f\n'.format(def_prefix, scaling)+\
@@ -1206,6 +1214,8 @@ class ConstrainedSystem:
                   '\n/* Number of inputs and outputs */\n'\
                   '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
                   '#define {:}_NY\t\t\t{:}\n'.format(def_prefix, n_y)+\
+                  '\n/* Number of external disturbances */\n'\
+                  '#define {:}_ND\t\t\t{:}\n'.format(def_prefix, n_d)+\
                   '\n/* Size of control vector */\n'\
                   '#define {:}_NC_x_NU\t\t{:}_NC * {:}_NU\n'.format(def_prefix, def_prefix, def_prefix)
         text = text + defines
@@ -1236,20 +1246,36 @@ class ConstrainedSystem:
                     idx.append(i)
             idx = np.array(idx)
 
-        x_lim_sz = idx.shape[0]
-        x_min_text = np_array_to_c(x_lim[0][idx] / scaling, 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
-        x_max_text = np_array_to_c(x_lim[1][idx] / scaling, 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
-        x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
-
-        constraints = '\n/* State constraints */\n'+\
-                      '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)+\
-                      x_min_text+\
-                      x_max_text+\
-                      x_lim_idx_text
+            x_lim_sz = idx.shape[0]
+            x_min_text = np_array_to_c(x_lim[0][idx] / scaling, 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
+            x_max_text = np_array_to_c(x_lim[1][idx] / scaling, 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
+            x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
+            
+            constraints = '\n/* State constraints */\n'+\
+                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)+\
+                          x_min_text+\
+                          x_max_text+\
+                          x_lim_idx_text
+        else:
+            
+            constraints = '\n/* State constraints */\n'+\
+                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, 0)
+            
         text = text + constraints
 
-
-        matrices_prefix = 'DIM'
+        idx = []
+        if Cm.ndim != 1:
+            Cm = np.sum(Cm, axis=0)
+        for i, yi in enumerate(Cm):
+            if np.abs(yi) > 0.5: idx.append(i)
+        idx = np.array(idx)
+        outputs_sz = idx.shape[0]
+        outputs_idx_text = np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+        outs = '\n/* Indexes of outputs */\n'+\
+               outputs_idx_text
+        text = text + outs
+        
+        matrices_prefix = 'DMPC_M'
         A_text = np_array_to_c(Am, 'float {:}_A'.format(matrices_prefix)) + '\n'
         if Bd is not None:
             B = np.concatenate((Bm, Bd), axis=1)
@@ -1262,7 +1288,7 @@ class ConstrainedSystem:
                   B_text
         text = text + matrices
         
-        matrices_prefix = 'DIM_'
+        matrices_prefix = 'DMPC_M_'
         matrices = '\n/*\n * Matrices for QP solvers \n'\
                    ' *\n'\
                    ' * The matrices were generated considering the following problem:\n'\
@@ -1293,7 +1319,7 @@ class ConstrainedSystem:
         du2 = np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix)) + '\n\n'
         text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
 
-        def_guard_end = '\n#endif /* DMPC_INVERTER_MATRICES_H_ */\n'
+        def_guard_end = '\n#endif /* DMPC_MATRICES_H_ */\n'
         text = text + def_guard_end
 
         if file is not None:
