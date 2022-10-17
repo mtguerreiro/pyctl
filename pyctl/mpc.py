@@ -706,7 +706,9 @@ class ConstrainedModel:
             
             self.x_lim = np.array(x_lim_new)
 
-            M_x = np.concatenate((-Phi_x, Phi_x))
+            M_aux = np.tril( np.tile( np.eye(x_lim.shape[0]), (n_r, n_r) ) )
+            self.M_x_aux = M_aux
+            M_x = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
             if M == []:
                 M = M_x
@@ -736,6 +738,7 @@ class ConstrainedModel:
         n_r = self.n_r
         F, Phi = self.F, self.Phi
         R_s_bar = self.R_s_bar
+        M_x_aux = self.M_x_aux
        
         u_lim = self.u_lim
         x_lim = self.x_lim
@@ -756,8 +759,9 @@ class ConstrainedModel:
         if x_lim is not None:
             C_x = self.C_x
             F_x = self.F_x
-            x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + F_x @ dx.reshape(-1, 1)
-            x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - F_x @ dx.reshape(-1, 1)
+            M_F_x = M_x_aux @ F_x
+            x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + M_F_x @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - M_F_x @ dx.reshape(-1, 1)
 
             if y == []:
                 y = np.concatenate((x_min, x_max))
