@@ -706,7 +706,7 @@ class ConstrainedModel:
             
             self.x_lim = np.array(x_lim_new)
 
-            M_aux = np.tril( np.tile( np.eye(x_lim.shape[0]), (n_r, n_r) ) )
+            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_r, n_r) ) )
             self.M_x_aux = M_aux
             M_x = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
@@ -1175,7 +1175,7 @@ class ConstrainedSystem:
         if x_lim is None:
             Fxp = np.zeros((1,1))
         else:
-            Fxp = self.constr_model.F_x
+            Fxp = self.constr_model.M_x_aux @ self.constr_model.F_x
 
         Ej = self.constr_model.E_j
 
