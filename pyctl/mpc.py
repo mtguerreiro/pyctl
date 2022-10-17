@@ -535,7 +535,8 @@ class System:
         u = np.zeros((n, n_u))
 
         x_m[0] = x_i[:, 0]
-        dx = x_i[:, 1]
+        #dx = x_i[:, 1]
+        dx = 0
         u[0] = u_i
 
         K_y, K_mpc = self.opt_cl_gains()
@@ -704,9 +705,9 @@ class ConstrainedModel:
             self.C_x = C_x
             
             self.x_lim = np.array(x_lim_new)
-            
+
             M_x = np.concatenate((-Phi_x, Phi_x))
-            
+
             if M == []:
                 M = M_x
             else:
@@ -776,7 +777,7 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du = self.qp(F_j, y, method='hild')
+        du = self.qp(F_j, y, method='cvx')
 
         return du[:n_u]
 
@@ -808,7 +809,7 @@ class ConstrainedModel:
             if self.x_lim is None and self.u_lim is None:
                 du_opt = (-E_j_inv @ F_j).reshape(-1)
             else:
-                lm, n_iters = pydqp.hild(H_j, K_j, n_iter=500, ret_n_iter=True)
+                lm, n_iters = pydqp.hild(H_j, K_j, n_iter=5000, ret_n_iter=True)
                 lm = lm.reshape(-1, 1)
                 du_opt = -E_j_inv @ (F_j + M.T @ lm)
                 du_opt = du_opt.reshape(-1)
@@ -1067,7 +1068,8 @@ class ConstrainedSystem:
         u = np.zeros((n, n_u))
 
         x_m[0] = x_i[:, 0]
-        dx = x_i[:, 1]
+        #dx = x_i[:, 1]
+        dx = 0
         u[0] = u_i
 
         if Bd is None:
@@ -1092,6 +1094,12 @@ class ConstrainedSystem:
             u[i] = u[i] + du
             
             # Applies the control law
+            #v = x_m[i, 1]
+            #if v >= 5.0:
+            #    #u_d[i] = 20 / v * np.sin(2*np.pi*300*i*1/50e3)
+            #    u_d[i] = 20 / v
+            #else:
+            #    u_d[i] = 0
             x_m[i + 1] = Am @ x_m[i] + Bm @ u[i] + Bd @ u_d[i]
 
             # Update variables for next iteration
