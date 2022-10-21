@@ -1121,7 +1121,7 @@ class ConstrainedSystem:
         return results
 
 
-    def export(self, file='.', scaling=1.0, Bd=None):
+    def export(self, file_path='.', scaling=1.0, Bd=None):
 
         def np_array_to_c(arr, arr_name):
 
@@ -1213,25 +1213,6 @@ class ConstrainedSystem:
 
         def_prefix = 'DMPC_CONFIG'
 
-        defines ='\n/* Scaling factor */\n'\
-                  '#define {:}_SCALE\t\t\t{:f}f\n'.format(def_prefix, scaling)+\
-                  '\n/* Number of model states and augmented states */\n'\
-                  '#define {:}_NXM\t\t\t{:}\n'.format(def_prefix, n_s)+\
-                  '#define {:}_NXA\t\t\t{:}\n'.format(def_prefix, n_as)+\
-                  '\n/* Prediction, control and constraint horizon */\n'\
-                  '#define {:}_NP\t\t\t{:}\n'.format(def_prefix, n_p)+\
-                  '#define {:}_NC\t\t\t{:}\n'.format(def_prefix, n_c)+\
-                  '#define {:}_NR\t\t\t{:}\n'.format(def_prefix, n_r)+\
-                  '#define {:}_NLAMBDA\t\t{:}\n'.format(def_prefix, n_lambda)+\
-                  '\n/* Number of inputs and outputs */\n'\
-                  '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
-                  '#define {:}_NY\t\t\t{:}\n'.format(def_prefix, n_y)+\
-                  '\n/* Number of external disturbances */\n'\
-                  '#define {:}_ND\t\t\t{:}\n'.format(def_prefix, n_d)+\
-                  '\n/* Size of control vector */\n'\
-                  '#define {:}_NC_x_NU\t\t{:}_NC * {:}_NU\n'.format(def_prefix, def_prefix, def_prefix)
-        text = text + defines
-
         if u_lim is not None:
             idx = []
             for i, xi in enumerate(u_lim[0]):
@@ -1245,7 +1226,6 @@ class ConstrainedSystem:
         x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz)) + '\n'
             
         constraints = '\n/* Input constraints */\n'+\
-                      '#define {:}_NU_CTR\t\t{:}\n'.format(def_prefix, u_lim_sz)+\
                       u_min_text+\
                       u_max_text+\
                       x_lim_idx_text
@@ -1264,14 +1244,13 @@ class ConstrainedSystem:
             x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
             
             constraints = '\n/* State constraints */\n'+\
-                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)+\
                           x_min_text+\
                           x_max_text+\
                           x_lim_idx_text
         else:
-            
+           
             constraints = '\n/* State constraints */\n'+\
-                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, 0)
+                          ' '
             
         text = text + constraints
 
@@ -1334,8 +1313,85 @@ class ConstrainedSystem:
         def_guard_end = '\n#endif /* DMPC_MATRICES_H_ */\n'
         text = text + def_guard_end
 
-        if file is not None:
-            with open(file, 'w') as efile:
+        if file_path is not None:
+            with open(file_path + 'dmpc_matrices.h', 'w') as efile:
+                print(file_path + 'dmpc_matrices.h')
+                efile.write(text)
+
+
+        text = ''
+
+        header = '/**\n'\
+         ' * @file dmpc_defs.h\n'\
+         ' * @brief Header with definitions to aid the DMPC algorithm.\n'\
+         ' *\n'\
+         ' * This file is generated automatically and should not be modified.\n'\
+         ' *\n'\
+         ' *  Originally created on: 21.10.2022\n'\
+         ' *      Author: mguerreiro\n'\
+         ' */\n'
+        
+        text = text + header
+
+        def_guard = '\n#ifndef DMPC_DEFS_H_\n'\
+                    '#define DMPC_DEFS_H_\n'
+        text = text + def_guard
+
+        def_prefix = 'DMPC_CONFIG'
+
+        defines ='\n/* Scaling factor */\n'\
+                  '#define {:}_SCALE\t\t\t{:f}f\n'.format(def_prefix, scaling)+\
+                  '\n/* Number of model states and augmented states */\n'\
+                  '#define {:}_NXM\t\t\t{:}\n'.format(def_prefix, n_s)+\
+                  '#define {:}_NXA\t\t\t{:}\n'.format(def_prefix, n_as)+\
+                  '\n/* Prediction, control and constraint horizon */\n'\
+                  '#define {:}_NP\t\t\t{:}\n'.format(def_prefix, n_p)+\
+                  '#define {:}_NC\t\t\t{:}\n'.format(def_prefix, n_c)+\
+                  '#define {:}_NR\t\t\t{:}\n'.format(def_prefix, n_r)+\
+                  '#define {:}_NLAMBDA\t\t{:}\n'.format(def_prefix, n_lambda)+\
+                  '\n/* Number of inputs and outputs */\n'\
+                  '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
+                  '#define {:}_NY\t\t\t{:}\n'.format(def_prefix, n_y)+\
+                  '\n/* Number of external disturbances */\n'\
+                  '#define {:}_ND\t\t\t{:}\n'.format(def_prefix, n_d)+\
+                  '\n/* Size of control vector */\n'\
+                  '#define {:}_NC_x_NU\t\t{:}_NC * {:}_NU\n'.format(def_prefix, def_prefix, def_prefix)
+        text = text + defines
+
+        if u_lim is not None:
+            idx = []
+            for i, xi in enumerate(u_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
+          
+        constraints = '\n/* Input constraints */\n'+\
+                      '#define {:}_NU_CTR\t\t{:}\n'.format(def_prefix, u_lim_sz)
+        text = text + constraints
+
+        if x_lim is not None:
+            constraints = '\n/* State constraints */\n'+\
+                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)
+        else:
+            constraints = '\n/* State constraints */\n'+\
+                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, 0)
+            
+        text = text + constraints
+
+        idx = []
+        if Cm.ndim != 1:
+            Cm = np.sum(Cm, axis=0)
+        for i, yi in enumerate(Cm):
+            if np.abs(yi) > 0.5: idx.append(i)
+        idx = np.array(idx)
+        outputs_sz = idx.shape[0]
+        outputs_idx_text = np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+
+        def_guard_end = '\n#endif /* DMPC_DEFS_H_ */\n'
+        text = text + def_guard_end
+
+        if file_path is not None:
+            with open(file_path + 'dmpc_defs.h', 'w') as efile:
                 efile.write(text)
                 
         #print(text)
