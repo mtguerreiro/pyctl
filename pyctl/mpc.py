@@ -1167,7 +1167,8 @@ class ConstrainedSystem:
         n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
         u_lim, x_lim = self.u_lim, self.x_lim
 
-        Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
+        #Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
+        Fj1 = -self.constr_model.Phi.T
         Fj2 = self.constr_model.Phi.T @ self.constr_model.F
 
         Kj1 = self.constr_model.M @ self.constr_model.E_j_inv
