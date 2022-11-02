@@ -781,9 +781,9 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du = self.qp(F_j, y, method='cvx')
+        du, n_iters = self.qp(F_j, y, method='hild')
 
-        return du[:n_u]
+        return (du[:n_u], n_iters)
 
     
     def qp(self, F_j, y, method='hild'):
@@ -820,14 +820,16 @@ class ConstrainedModel:
 
         elif method == 'cvx':
             du_opt = qps.cvxopt_solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
-
+            n_iters = 0
         elif method == 'quadprog':
             du_opt = qps.solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
+            n_iters = 0
 
         else:
             du_opt = 0
+            n_iters = 0
 
-        return du_opt
+        return (du_opt, n_iters)
 
 
 class ConstrainedSystem:
@@ -1068,6 +1070,7 @@ class ConstrainedSystem:
         x_m = np.zeros((n, n_xm))
         x = np.zeros((n, n_x))
         y = np.zeros((n, n_y))
+        n_iters = np.zeros(n)
 
         u = np.zeros((n, n_u))
 
@@ -1094,7 +1097,7 @@ class ConstrainedSystem:
             xa[:n_xm, 0] = dx
             xa[n_xm:, 0] = y[i]
 
-            du = self.constr_model.opt(x_m[i], dx, xa, u[i], r[i])
+            du, n_iters[i] = self.constr_model.opt(x_m[i], dx, xa, u[i], r[i])
             u[i] = u[i] + du
             
             # Applies the control law
@@ -1117,7 +1120,8 @@ class ConstrainedSystem:
         results['u'] = u
         results['x_m'] = x_m
         results['y'] = y
-
+        results['n_iters'] = n_iters
+        
         return results
 
 
@@ -1318,7 +1322,6 @@ class ConstrainedSystem:
 
         if file_path is not None:
             with open(file_path + 'dmpc_matrices.h', 'w') as efile:
-                print(file_path + 'dmpc_matrices.h')
                 efile.write(text)
 
 
