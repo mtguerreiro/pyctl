@@ -738,7 +738,6 @@ class ConstrainedModel:
         n_r = self.n_r
         F, Phi = self.F, self.Phi
         R_s_bar = self.R_s_bar
-        M_x_aux = self.M_x_aux
        
         u_lim = self.u_lim
         x_lim = self.x_lim
@@ -757,6 +756,7 @@ class ConstrainedModel:
 
         # Now, the state inequality constraints
         if x_lim is not None:
+            M_x_aux = self.M_x_aux
             C_x = self.C_x
             F_x = self.F_x
             M_F_x = M_x_aux @ F_x
