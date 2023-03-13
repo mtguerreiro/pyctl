@@ -1,7 +1,6 @@
 import numpy as np
 import pyctl as ctl
 import qpsolvers as qps
-import pydsim.qp as pydqp
 import sys
 
 def aug(Am, Bm, Cm):
@@ -781,7 +780,7 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du, n_iters = self.qp(F_j, y, method='hild')
+        du, n_iters = self.qp(F_j, y, method='cvx')
 
         return (du[:n_u], n_iters)
 
@@ -813,7 +812,7 @@ class ConstrainedModel:
             if self.x_lim is None and self.u_lim is None:
                 du_opt = (-E_j_inv @ F_j).reshape(-1)
             else:
-                lm, n_iters = pydqp.hild(H_j, K_j, n_iter=5000, ret_n_iter=True)
+                lm, n_iters = pyctl.qp.hild(H_j, K_j, n_iter=5000, ret_n_iter=True)
                 lm = lm.reshape(-1, 1)
                 du_opt = -E_j_inv @ (F_j + M.T @ lm)
                 du_opt = du_opt.reshape(-1)
