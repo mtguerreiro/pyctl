@@ -807,15 +807,19 @@ class ConstrainedModel:
         K_j = y + M @ E_j_inv @ F_j
         self.H_j = H_j
         self.K_j = K_j
+        #print(K_j.reshape(-1))
 
         if method == 'hild':
             if self.x_lim is None and self.u_lim is None:
                 du_opt = (-E_j_inv @ F_j).reshape(-1)
             else:
-                lm, n_iters = pyctl.qp.hild(H_j, K_j, n_iter=5000, ret_n_iter=True)
+                lm, n_iters = ctl.qp.hild(H_j, K_j, n_iter=10, ret_n_iter=True)
                 lm = lm.reshape(-1, 1)
                 du_opt = -E_j_inv @ (F_j + M.T @ lm)
                 du_opt = du_opt.reshape(-1)
+                #print(lm)
+                #print(n_iters)
+                #print('\n')
 
         elif method == 'cvx':
             du_opt = qps.cvxopt_solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
@@ -1124,34 +1128,35 @@ class ConstrainedSystem:
         return results
 
 
-    def export(self, file_path='.', scaling=1.0, Bd=None, ref='constant'):
+    def _export_np_array_to_c(self, arr, arr_name, fill=True):
 
-        def np_array_to_c(arr, arr_name):
-
-            if arr.ndim == 1:
+        if arr.ndim == 1:
+            n = arr.shape[0]
+            m = 1
+        else:
+            if (arr.shape[0] == 1) or (arr.shape[1] == 1):
+                arr = arr.flatten()
                 n = arr.shape[0]
                 m = 1
             else:
-                if (arr.shape[0] == 1) or (arr.shape[1] == 1):
-                    arr = arr.flatten()
-                    n = arr.shape[0]
-                    m = 1
-                else:
-                    n, m = arr.shape
+                n, m = arr.shape
 
-            arr_str = np.array2string(arr, separator=',')
-            arr_str = arr_str.replace('[', '{')
-            arr_str = arr_str.replace(']', '}')
+        arr_str = np.array2string(arr, separator=',')
+        arr_str = arr_str.replace('[', '{')
+        arr_str = arr_str.replace(']', '}')
 
-            if m == 1:
-                arr_str = '{:}[{:}] = {:};'.format(arr_name, n, arr_str)
-            else:
-                arr_str = '{:}[{:}][{:}] = {:};'.format(arr_name, n, m, arr_str)
+        if m == 1:
+            arr_txt = '{:}[{:}];'.format(arr_name, n)
+        else:
+            arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
 
-            return arr_str
+        if fill is True:
+            arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
+            
+        return arr_txt
+
     
-        #np.set_printoptions(floatmode='unique')
-        np.set_printoptions(threshold=sys.maxsize)
+    def _export_gen_header(self, scaling=1.0, Bd=None, ref='constant'):
 
         Am, Bm, Cm = self.constr_model.Am, self.constr_model.Bm, self.constr_model.Cm
 
@@ -1191,6 +1196,8 @@ class ConstrainedSystem:
         Hj[:] = self.constr_model.H_j[:]
         Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
 
+        #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
+        
         DU1 = (-self.constr_model.E_j_inv)[:n_u, :]
         DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[:n_u, :]
         n_lambda = DU2.shape[1]
@@ -1227,9 +1234,9 @@ class ConstrainedSystem:
             idx = np.array(idx)
 
         u_lim_sz = idx.shape[0]
-        u_min_text = np_array_to_c(u_lim[0] / scaling, 'float {:}_U_MIN'.format(def_prefix, u_lim_sz)) + '\n'
-        u_max_text = np_array_to_c(u_lim[1] / scaling, 'float {:}_U_MAX'.format(def_prefix, u_lim_sz)) + '\n'
-        x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz)) + '\n'
+        u_min_text = self._export_np_array_to_c(u_lim[0] / scaling, 'extern float {:}_U_MIN'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+        u_max_text = self._export_np_array_to_c(u_lim[1] / scaling, 'extern float {:}_U_MAX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+        x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
             
         constraints = '\n/* Input constraints */\n'+\
                       u_min_text+\
@@ -1245,9 +1252,9 @@ class ConstrainedSystem:
             idx = np.array(idx)
 
             x_lim_sz = idx.shape[0]
-            x_min_text = np_array_to_c(x_lim[0][idx] / scaling, 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
-            x_max_text = np_array_to_c(x_lim[1][idx] / scaling, 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
-            x_lim_idx_text = np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
+            x_min_text = self._export_np_array_to_c(x_lim[0][idx] / scaling, 'extern float {:}_XM_MIN'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+            x_max_text = self._export_np_array_to_c(x_lim[1][idx] / scaling, 'extern float {:}_XM_MAX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+            x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
             
             constraints = '\n/* State constraints */\n'+\
                           x_min_text+\
@@ -1267,18 +1274,18 @@ class ConstrainedSystem:
             if np.abs(yi) > 0.5: idx.append(i)
         idx = np.array(idx)
         outputs_sz = idx.shape[0]
-        outputs_idx_text = np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+        outputs_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz), fill=False) + '\n'
         outs = '\n/* Indexes of outputs */\n'+\
                outputs_idx_text
         text = text + outs
         
         matrices_prefix = 'DMPC_M'
-        A_text = np_array_to_c(Am, 'float {:}_A'.format(matrices_prefix)) + '\n'
+        A_text = self._export_np_array_to_c(Am, 'extern float {:}_A'.format(matrices_prefix), fill=False) + '\n'
         if Bd is not None:
             B = np.concatenate((Bm, Bd), axis=1)
         else:
             B = Bm
-        B_text = np_array_to_c(B, 'float {:}_B'.format(matrices_prefix)) + '\n'
+        B_text = self._export_np_array_to_c(B, 'extern float {:}_B'.format(matrices_prefix), fill=False) + '\n'
         
         matrices ='\n/* A and B matrices for prediction */\n'+\
                   A_text+\
@@ -1300,30 +1307,230 @@ class ConstrainedSystem:
                    ' * Note that the Fj and gam matrices are usually updated online, while Ej\n'\
                    ' * and M are static.\n'\
                    ' */\n'
-        ej = np_array_to_c(Ej, 'float {:}Ej'.format(matrices_prefix)) + '\n\n'
-        fj = 'float {:}Fj[{:}];\n\n'.format(matrices_prefix, n_c * n_u)
-        m = np_array_to_c(M, 'float {:}M'.format(matrices_prefix)) + '\n\n'
-        gam = 'float {:}gam[{:}];\n'.format(matrices_prefix, n_lambda)
+        ej = self._export_np_array_to_c(Ej, 'extern float {:}Ej'.format(matrices_prefix), fill=False) + '\n\n'
+        fj = 'extern float {:}Fj[{:}];\n\n'.format(matrices_prefix, n_c * n_u)
+        m = self._export_np_array_to_c(M, 'extern float {:}M'.format(matrices_prefix), fill=False) + '\n\n'
+        gam = 'extern float {:}gam[{:}];\n'.format(matrices_prefix, n_lambda)
         text = text + matrices + ej + fj + m + gam
         
         matrices = '\n /* Matrices for Hildreth\'s QP procedure */\n'
-        fj1 = np_array_to_c(Fj1, 'float {:}Fj_1'.format(matrices_prefix)) + '\n\n'
-        fj2 = np_array_to_c(Fj2, 'float {:}Fj_2'.format(matrices_prefix)) + '\n\n'
-        fxp = np_array_to_c(Fxp, 'float {:}Fx'.format(matrices_prefix)) + '\n\n'
-        kj1 = np_array_to_c(Kj1, 'float {:}Kj_1'.format(matrices_prefix)) + '\n\n'
-        hj = np_array_to_c(Hj, 'float {:}Hj'.format(matrices_prefix)) + '\n\n'
-        du1 = np_array_to_c(DU1, 'float {:}DU_1'.format(matrices_prefix)) + '\n\n'
-        du2 = np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix)) + '\n\n'
+        fj1 = self._export_np_array_to_c(Fj1, 'float {:}Fj_1'.format(matrices_prefix), fill=False) + '\n\n'
+        fj2 = self._export_np_array_to_c(Fj2, 'float {:}Fj_2'.format(matrices_prefix), fill=False) + '\n\n'
+        fxp = self._export_np_array_to_c(Fxp, 'float {:}Fx'.format(matrices_prefix), fill=False) + '\n\n'
+        kj1 = self._export_np_array_to_c(Kj1, 'float {:}Kj_1'.format(matrices_prefix), fill=False) + '\n\n'
+        hj = self._export_np_array_to_c(Hj, 'float {:}Hj'.format(matrices_prefix), fill=False) + '\n\n'
+        #hj_fxp = self._export_np_array_to_c(Hj_fxp, 'int {:}Hj_fxp'.format(matrices_prefix)) + '\n\n'
+        du1 = self._export_np_array_to_c(DU1, 'float {:}DU_1'.format(matrices_prefix), fill=False) + '\n\n'
+        du2 = self._export_np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix), fill=False) + '\n\n'
         text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
 
         def_guard_end = '\n#endif /* DMPC_MATRICES_H_ */\n'
         text = text + def_guard_end
 
-        if file_path is not None:
-            with open(file_path + 'dmpc_matrices.h', 'w') as efile:
-                efile.write(text)
+        return text
 
 
+    def _export_gen_source(self, scaling=1.0, Bd=None, ref='constant'):
+
+        Am, Bm, Cm = self.constr_model.Am, self.constr_model.Bm, self.constr_model.Cm
+
+        n_s, n_as = self.constr_model.Am.shape[0], self.constr_model.A.shape[0]
+
+        n_u = self.constr_model.Bm.shape[1]
+
+        if Bd is None:
+            n_d = 0
+        else:
+            n_d = Bd.shape[1]
+
+        if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
+        else: n_y = 1
+
+        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        u_lim, x_lim = self.u_lim, self.x_lim
+
+        if ref == 'constant':
+            Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
+        else:
+            Fj1 = -self.constr_model.Phi.T
+        Fj2 = self.constr_model.Phi.T @ self.constr_model.F
+
+        Kj1 = self.constr_model.M @ self.constr_model.E_j_inv
+
+        if x_lim is None:
+            Fxp = np.zeros((1,1))
+        else:
+            Fxp = self.constr_model.M_x_aux @ self.constr_model.F_x
+
+        Ej = self.constr_model.E_j
+
+        M = self.constr_model.M
+
+        Hj = np.zeros(self.constr_model.H_j.shape, dtype=self.constr_model.H_j.dtype)
+        Hj[:] = self.constr_model.H_j[:]
+        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+
+        #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
+        
+        DU1 = (-self.constr_model.E_j_inv)[:n_u, :]
+        DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[:n_u, :]
+        n_lambda = DU2.shape[1]
+
+        text = ''
+
+        header = '/**\n'\
+         ' * @file dmpc_matrices.c\n'\
+         ' * @brief Source with data to run the DMPC algorithm.\n'\
+         ' *\n'\
+         ' * This file is generated automatically and should not be modified.\n'\
+         ' *\n'\
+         ' * The Hj matrix is already generated by flipping the sign and inverting its\n'\
+         ' * diagonal elements, so that Hildreth\'s algorithm does not require any \n'\
+         ' * divisions.\n'\
+         ' *\n'\
+         ' *  Originally created on: 22.04.2022\n'\
+         ' *      Author: mguerreiro\n'\
+         ' */\n'
+
+        inc = '\n#include \"dmpc_matrices.h\"\n'
+        text = text + header + inc
+
+        def_prefix = 'DMPC_CONFIG'
+
+        if u_lim is not None:
+            idx = []
+            for i, xi in enumerate(u_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
+
+        u_lim_sz = idx.shape[0]
+        u_min_text = self._export_np_array_to_c(u_lim[0] / scaling, 'float {:}_U_MIN'.format(def_prefix, u_lim_sz)) + '\n'
+        u_max_text = self._export_np_array_to_c(u_lim[1] / scaling, 'float {:}_U_MAX'.format(def_prefix, u_lim_sz)) + '\n'
+        x_lim_idx_text = self._export_np_array_to_c(idx, 'uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz)) + '\n'
+            
+        constraints = '\n/* Input constraints */\n'+\
+                      u_min_text+\
+                      u_max_text+\
+                      x_lim_idx_text
+        text = text + constraints
+
+        if x_lim is not None:
+            idx = []
+            for i, xi in enumerate(x_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
+
+            x_lim_sz = idx.shape[0]
+            x_min_text = self._export_np_array_to_c(x_lim[0][idx] / scaling, 'float {:}_XM_MIN'.format(def_prefix, x_lim_sz)) + '\n'
+            x_max_text = self._export_np_array_to_c(x_lim[1][idx] / scaling, 'float {:}_XM_MAX'.format(def_prefix, x_lim_sz)) + '\n'
+            x_lim_idx_text = self._export_np_array_to_c(idx, 'uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz)) + '\n'
+            
+            constraints = '\n/* State constraints */\n'+\
+                          x_min_text+\
+                          x_max_text+\
+                          x_lim_idx_text
+        else:
+           
+            constraints = '\n/* State constraints */\n'+\
+                          ' '
+            
+        text = text + constraints
+
+        idx = []
+        if Cm.ndim != 1:
+            Cm = np.sum(Cm, axis=0)
+        for i, yi in enumerate(Cm):
+            if np.abs(yi) > 0.5: idx.append(i)
+        idx = np.array(idx)
+        outputs_sz = idx.shape[0]
+        outputs_idx_text = self._export_np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+        outs = '\n/* Indexes of outputs */\n'+\
+               outputs_idx_text
+        text = text + outs
+        
+        matrices_prefix = 'DMPC_M'
+        A_text = self._export_np_array_to_c(Am, 'float {:}_A'.format(matrices_prefix)) + '\n'
+        if Bd is not None:
+            B = np.concatenate((Bm, Bd), axis=1)
+        else:
+            B = Bm
+        B_text = self._export_np_array_to_c(B, 'float {:}_B'.format(matrices_prefix)) + '\n'
+        
+        matrices ='\n/* A and B matrices for prediction */\n'+\
+                  A_text+\
+                  B_text
+        text = text + matrices
+
+        text = text + '\n/* Matrices for QP solvers */\n'
+        matrices_prefix = 'DMPC_M_'
+        ej = self._export_np_array_to_c(Ej, 'float {:}Ej'.format(matrices_prefix)) + '\n\n'
+        fj = 'float {:}Fj[{:}];\n\n'.format(matrices_prefix, n_c * n_u)
+        m = self._export_np_array_to_c(M, 'float {:}M'.format(matrices_prefix)) + '\n\n'
+        gam = 'float {:}gam[{:}];\n'.format(matrices_prefix, n_lambda)
+        text = text + ej + fj + m + gam
+        
+        matrices = '\n /* Matrices for Hildreth\'s QP procedure */\n'
+        fj1 = self._export_np_array_to_c(Fj1, 'float {:}Fj_1'.format(matrices_prefix)) + '\n\n'
+        fj2 = self._export_np_array_to_c(Fj2, 'float {:}Fj_2'.format(matrices_prefix)) + '\n\n'
+        fxp = self._export_np_array_to_c(Fxp, 'float {:}Fx'.format(matrices_prefix)) + '\n\n'
+        kj1 = self._export_np_array_to_c(Kj1, 'float {:}Kj_1'.format(matrices_prefix)) + '\n\n'
+        hj = self._export_np_array_to_c(Hj, 'float {:}Hj'.format(matrices_prefix)) + '\n\n'
+        #hj_fxp = self._export_np_array_to_c(Hj_fxp, 'int {:}Hj_fxp'.format(matrices_prefix)) + '\n\n'
+        du1 = self._export_np_array_to_c(DU1, 'float {:}DU_1'.format(matrices_prefix)) + '\n\n'
+        du2 = self._export_np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix)) + '\n'
+        text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
+
+        return text
+    
+
+    def _export_gen_defs(self, scaling=1.0, Bd=None, ref='constant'):
+
+        Am, Bm, Cm = self.constr_model.Am, self.constr_model.Bm, self.constr_model.Cm
+
+        n_s, n_as = self.constr_model.Am.shape[0], self.constr_model.A.shape[0]
+
+        n_u = self.constr_model.Bm.shape[1]
+
+        if Bd is None:
+            n_d = 0
+        else:
+            n_d = Bd.shape[1]
+
+        if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
+        else: n_y = 1
+
+        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        u_lim, x_lim = self.u_lim, self.x_lim
+
+        if ref == 'constant':
+            Fj1 = -self.constr_model.Phi.T @ self.constr_model.R_s_bar
+        else:
+            Fj1 = -self.constr_model.Phi.T
+        Fj2 = self.constr_model.Phi.T @ self.constr_model.F
+
+        Kj1 = self.constr_model.M @ self.constr_model.E_j_inv
+
+        if x_lim is None:
+            Fxp = np.zeros((1,1))
+        else:
+            Fxp = self.constr_model.M_x_aux @ self.constr_model.F_x
+
+        Ej = self.constr_model.E_j
+
+        M = self.constr_model.M
+
+        Hj = np.zeros(self.constr_model.H_j.shape, dtype=self.constr_model.H_j.dtype)
+        Hj[:] = self.constr_model.H_j[:]
+        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+
+        #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
+        
+        DU1 = (-self.constr_model.E_j_inv)[:n_u, :]
+        DU2 = (-self.constr_model.E_j_inv @ self.constr_model.M.T)[:n_u, :]
+        n_lambda = DU2.shape[1]
+        
         text = ''
 
         header = '/**\n'\
@@ -1369,11 +1576,36 @@ class ConstrainedSystem:
                 if xi != None:
                     idx.append(i)
             idx = np.array(idx)
+
+        u_lim_sz = idx.shape[0]
+        u_min_text = self._export_np_array_to_c(u_lim[0] / scaling, 'extern float {:}_U_MIN'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+        u_max_text = self._export_np_array_to_c(u_lim[1] / scaling, 'extern float {:}_U_MAX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+        x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
           
         constraints = '\n/* Input constraints */\n'+\
                       '#define {:}_NU_CTR\t\t{:}\n'.format(def_prefix, u_lim_sz)
         text = text + constraints
 
+        if x_lim is not None:
+            idx = []
+            for i, xi in enumerate(x_lim[0]):
+                if xi != None:
+                    idx.append(i)
+            idx = np.array(idx)
+
+            x_lim_sz = idx.shape[0]
+            x_min_text = self._export_np_array_to_c(x_lim[0][idx] / scaling, 'extern float {:}_XM_MIN'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+            x_max_text = self._export_np_array_to_c(x_lim[1][idx] / scaling, 'extern float {:}_XM_MAX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+            x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+            
+            constraints = '\n/* State constraints */\n'+\
+                          x_min_text+\
+                          x_max_text+\
+                          x_lim_idx_text
+        else:
+           
+            constraints = '\n/* State constraints */\n'+\
+                          ' '
         if x_lim is not None:
             constraints = '\n/* State constraints */\n'+\
                           '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)
@@ -1390,16 +1622,33 @@ class ConstrainedSystem:
             if np.abs(yi) > 0.5: idx.append(i)
         idx = np.array(idx)
         outputs_sz = idx.shape[0]
-        outputs_idx_text = np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+        outputs_idx_text = self._export_np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
 
         def_guard_end = '\n#endif /* DMPC_DEFS_H_ */\n'
         text = text + def_guard_end
 
+        return text
+
+    
+    def export(self, file_path='.', scaling=1.0, Bd=None, ref='constant'):
+    
+        #np.set_printoptions(floatmode='unique')
+        #np.set_printoptions(threshold=sys.maxsize)
+        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
+
+        text_source = self._export_gen_source(scaling=scaling, Bd=Bd, ref=ref)
+        text_header = self._export_gen_header(scaling=scaling, Bd=Bd, ref=ref)
+        text_defs   = self._export_gen_defs(scaling=scaling, Bd=Bd, ref=ref)
         if file_path is not None:
+            with open(file_path + 'dmpc_matrices.c', 'w') as efile:
+                efile.write(text_source)
+            with open(file_path + 'dmpc_matrices.h', 'w') as efile:
+                efile.write(text_header)
             with open(file_path + 'dmpc_defs.h', 'w') as efile:
-                efile.write(text)
+                efile.write(text_defs)
                 
         #print(text)
 
-        np.set_printoptions(threshold=1000)
+        np.set_printoptions(floatmode='fixed', threshold=1000)
+        #np.set_printoptions(threshold=1000)
         #np.set_printoptions(floatmode='maxprec_equal')
