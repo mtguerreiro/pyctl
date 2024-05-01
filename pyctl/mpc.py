@@ -1222,7 +1222,8 @@ class ConstrainedSystem:
 
         def_guard = '\n#ifndef DMPC_MATRICES_H_\n'\
                     '#define DMPC_MATRICES_H_\n'
-        text = text + def_guard
+        include = '\n#include "stdint.h"\n'
+        text = text + def_guard + include
 
         def_prefix = 'DMPC_CONFIG'
 
@@ -1314,14 +1315,14 @@ class ConstrainedSystem:
         text = text + matrices + ej + fj + m + gam
         
         matrices = '\n /* Matrices for Hildreth\'s QP procedure */\n'
-        fj1 = self._export_np_array_to_c(Fj1, 'float {:}Fj_1'.format(matrices_prefix), fill=False) + '\n\n'
-        fj2 = self._export_np_array_to_c(Fj2, 'float {:}Fj_2'.format(matrices_prefix), fill=False) + '\n\n'
-        fxp = self._export_np_array_to_c(Fxp, 'float {:}Fx'.format(matrices_prefix), fill=False) + '\n\n'
-        kj1 = self._export_np_array_to_c(Kj1, 'float {:}Kj_1'.format(matrices_prefix), fill=False) + '\n\n'
-        hj = self._export_np_array_to_c(Hj, 'float {:}Hj'.format(matrices_prefix), fill=False) + '\n\n'
+        fj1 = self._export_np_array_to_c(Fj1, 'extern float {:}Fj_1'.format(matrices_prefix), fill=False) + '\n\n'
+        fj2 = self._export_np_array_to_c(Fj2, 'extern float {:}Fj_2'.format(matrices_prefix), fill=False) + '\n\n'
+        fxp = self._export_np_array_to_c(Fxp, 'extern float {:}Fx'.format(matrices_prefix), fill=False) + '\n\n'
+        kj1 = self._export_np_array_to_c(Kj1, 'extern float {:}Kj_1'.format(matrices_prefix), fill=False) + '\n\n'
+        hj = self._export_np_array_to_c(Hj, 'extern float {:}Hj'.format(matrices_prefix), fill=False) + '\n\n'
         #hj_fxp = self._export_np_array_to_c(Hj_fxp, 'int {:}Hj_fxp'.format(matrices_prefix)) + '\n\n'
-        du1 = self._export_np_array_to_c(DU1, 'float {:}DU_1'.format(matrices_prefix), fill=False) + '\n\n'
-        du2 = self._export_np_array_to_c(DU2, 'float {:}DU_2'.format(matrices_prefix), fill=False) + '\n\n'
+        du1 = self._export_np_array_to_c(DU1, 'extern float {:}DU_1'.format(matrices_prefix), fill=False) + '\n\n'
+        du2 = self._export_np_array_to_c(DU2, 'extern float {:}DU_2'.format(matrices_prefix), fill=False) + '\n\n'
         text = text + matrices + fj1 + fj2 + fxp + kj1 + hj + du1 + du2
 
         def_guard_end = '\n#endif /* DMPC_MATRICES_H_ */\n'
