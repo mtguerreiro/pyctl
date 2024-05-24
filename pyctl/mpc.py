@@ -780,7 +780,7 @@ class ConstrainedModel:
         
         F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
 
-        du, n_iters = self.qp(F_j, y, method='cvx')
+        du, n_iters = self.qp(F_j, y, method='hild')
 
         return (du[:n_u], n_iters)
 
@@ -813,7 +813,7 @@ class ConstrainedModel:
             if self.x_lim is None and self.u_lim is None:
                 du_opt = (-E_j_inv @ F_j).reshape(-1)
             else:
-                lm, n_iters = ctl.qp.hild(H_j, K_j, n_iter=10, ret_n_iter=True)
+                lm, n_iters = ctl.qp.hild(H_j, K_j, n_iter=100, ret_n_iter=True)
                 lm = lm.reshape(-1, 1)
                 du_opt = -E_j_inv @ (F_j + M.T @ lm)
                 du_opt = du_opt.reshape(-1)
@@ -1077,8 +1077,7 @@ class ConstrainedSystem:
 
         u = np.zeros((n, n_u))
 
-        x_m[0] = x_i[:, 0]
-        #dx = x_i[:, 1]
+        x_m[0] = x_i[0][:n_xm]
         dx = 0
         u[0] = u_i
 
