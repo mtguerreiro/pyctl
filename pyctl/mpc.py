@@ -672,7 +672,7 @@ class ConstrainedModel:
 
         # Creates left-hand side inequality constraint, starting first with
         # control inequality constraints
-        M = []
+        M = None
         if u_lim is not None:
             M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
             M_u = np.concatenate((-M_aux, M_aux))
@@ -682,7 +682,7 @@ class ConstrainedModel:
         if x_lim is not None:
             n_state_ineq = 0
             x_lim_new = [[], []]
-            C_x = []
+            C_x = None
             
             for i, x_i in enumerate(x_lim[0]):
                 if x_i is not None:
@@ -694,7 +694,7 @@ class ConstrainedModel:
                     cx = np.zeros((1, Am.shape[0]))
                     cx[0, i] = 1
                     
-                    if C_x == []:
+                    if C_x is None:
                         C_x = cx
                     else:
                         C_x = np.concatenate((C_x, cx))
@@ -709,13 +709,13 @@ class ConstrainedModel:
             self.M_x_aux = M_aux
             M_x = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
-            if M == []:
+            if M is None:
                 M = M_x
             else:
                 M = np.concatenate((M, M_x))
 
         # If there were no constraints, creates an empty matrix
-        if M == []:
+        if M is None:
             M = np.zeros((1, m * n_r ))
         
         # Saves M matrix only after creating all constraints
@@ -745,7 +745,7 @@ class ConstrainedModel:
 
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
-        y = []
+        y = None
         
         if u_lim is not None:
             u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
@@ -762,13 +762,13 @@ class ConstrainedModel:
             x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + M_F_x @ dx.reshape(-1, 1)
             x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - M_F_x @ dx.reshape(-1, 1)
 
-            if y == []:
+            if y is None:
                 y = np.concatenate((x_min, x_max))
             else:
                 y = np.concatenate((y, x_min, x_max))
 
         # If there were no constraints, creates a zero vector
-        if y == []:
+        if y is None:
             y = np.zeros(1)
 
         return (F_j, y)
