@@ -598,8 +598,11 @@ class ConstrainedModel:
     n_c : :class:`int`
         Length of the control window.
 
-    n_r : :class:`int`
-        Length of constraint window. 
+    n_ct_st : :class:`int`
+        Length of window where state constraints are enforced. 
+
+    n_ct_st : :class:`int`
+        Length of window where input constraints are enforced. 
         
     r_w : :class:`int`, :class:`float`, :class:`np.array`, :class:`list`
         Weight of control action.
@@ -611,12 +614,13 @@ class ConstrainedModel:
         Lower and upper bounds of the control signals.
         
     """
-    def __init__(self, Am, Bm, Cm, n_p, n_c, n_r, r_w, x_lim, u_lim):
+    def __init__(self, Am, Bm, Cm, n_p, n_c, n_ct_st, n_ct_u, r_w, x_lim, u_lim):
 
         self.Am, self.Bm, self.Cm = Am, Bm, Cm
         self.A, self.B, self.C = aug(Am, Bm, Cm)
         
-        self.n_p, self.n_c, self.n_r = n_p, n_c, n_r
+        self.n_p, self.n_c = n_p, n_c
+        self.n_ct_st, self.n_ct_u = n_ct_st, n_ct_u
         self.r_w = r_w 
 
         if type(r_w) is int or type(r_w) is float:
@@ -646,7 +650,8 @@ class ConstrainedModel:
         """
         A, B, C = self.A, self.B, self.C
         Am, Bm, Cm = self.Am, self.Bm, self.Cm
-        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        n_p, n_c = self.n_p, self.n_c
+        n_ct_st, n_ct_u =  self.n_ct_st, self.n_ct_u
         r_w = self.r_w
 
         x_lim = self.x_lim
@@ -674,7 +679,7 @@ class ConstrainedModel:
         # control inequality constraints
         M = None
         if u_lim is not None:
-            M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
+            M_aux = np.tril( np.tile( np.eye(m), (n_ct_u, n_c) ) )
             M_u = np.concatenate((-M_aux, M_aux))
             M = M_u
 
@@ -699,13 +704,13 @@ class ConstrainedModel:
                     else:
                         C_x = np.concatenate((C_x, cx))
                         
-            F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
+            F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_ct_st, n_c)
             self.F_x, self.Phi_x = F_x, Phi_x
             self.C_x = C_x
             
             self.x_lim = np.array(x_lim_new)
 
-            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_r, n_r) ) )
+            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_ct_st, n_ct_st) ) )
             self.M_x_aux = M_aux
             M_x = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
@@ -734,7 +739,7 @@ class ConstrainedModel:
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
-        n_r = self.n_r
+        n_ct_st, n_ct_u = self.n_ct_st, self.n_ct_u
         F, Phi = self.F, self.Phi
         R_s_bar = self.R_s_bar
        
@@ -748,8 +753,8 @@ class ConstrainedModel:
         y = None
         
         if u_lim is not None:
-            u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
-            u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
+            u_min = np.tile(-u_lim[0] + u_i, n_ct_u).reshape(-1, 1)
+            u_max = np.tile( u_lim[1] - u_i, n_ct_u).reshape(-1, 1)
 
             y = np.concatenate((u_min, u_max))
 
@@ -759,8 +764,8 @@ class ConstrainedModel:
             C_x = self.C_x
             F_x = self.F_x
             M_F_x = M_x_aux @ F_x
-            x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + M_F_x @ dx.reshape(-1, 1)
-            x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - M_F_x @ dx.reshape(-1, 1)
+            x_min = np.tile(-x_lim[0] + C_x @ xm, n_ct_st).reshape(-1, 1) + M_F_x @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - C_x @ xm, n_ct_st).reshape(-1, 1) - M_F_x @ dx.reshape(-1, 1)
 
             if y is None:
                 y = np.concatenate((x_min, x_max))
@@ -857,9 +862,11 @@ class ConstrainedSystem:
     n_c : :class:`NoneType`, :class:`int`
         Length of control window. Can be set later. By default, it is `None`.
 
-    n_r : :class:`NoneType`, :class:`int`
-        Length of constraint window. Can be set later. By default, it is
-        `None`.
+    n_ct_st : :class:`int`
+        Length of window where state constraints are enforced. 
+
+    n_ct_st : :class:`int`
+        Length of window where input constraints are enforced. 
         
     r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weight of control action. Can be set later. By default, it is `None`.
@@ -890,14 +897,17 @@ class ConstrainedSystem:
     n_c : :class:`NoneType`, :class:`int`
         Size of control window.
 
-    n_r : :class:`NoneType`, :class:`int`
-        Size of constraint window.
+    n_ct_st : :class:`int`
+        Length of window where state constraints are enforced. 
+
+    n_ct_st : :class:`int`
+        Length of window where input constraints are enforced. 
 
     r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weight of control action.
     
     """
-    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None, x_lim=None, u_lim=None):
+    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_ct_st=None, n_ct_u=None, r_w=None, x_lim=None, u_lim=None):
         self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
         self.Am = Am
         self.Bm = Bm
@@ -905,7 +915,8 @@ class ConstrainedSystem:
 
         self.n_p = n_p
         self.n_c = n_c
-        self.n_r = n_r
+        self.n_ct_st = n_ct_st
+        self.n_ct_u = n_ct_u
 
         if type(r_w) is int or type(r_w) is float:
             r_w = np.array([r_w])
@@ -930,7 +941,7 @@ class ConstrainedSystem:
         self.u_lim = u_lim
         self.x_lim = x_lim
         
-        self.constr_model = ConstrainedModel(Am, Bm, Cm, n_p, n_c, n_r, r_w, x_lim, u_lim)
+        self.constr_model = ConstrainedModel(Am, Bm, Cm, n_p, n_c, n_ct_st, n_ct_u, r_w, x_lim, u_lim)
         
 
     def model_matrices(self):
@@ -983,16 +994,28 @@ class ConstrainedSystem:
         self.n_c = n_c
 
 
-    def set_constraint_horizon(self, n_r):
-        r"""Sets the length of the constraint window.
+    def set_constraint_horizon(self, n_ct_st):
+        r"""Sets the length of the state constraint window.
 
         Parameters
         ----------
-        n_r : :class:`int`
-            Length of constraint window.
+        n_ct_st : :class:`int`
+            Length of state constraint window.
         
         """
-        self.n_r = n_r
+        self.n_ct_st = n_ct_st
+
+
+    def set_constraint_horizon(self, n_ct_u):
+        r"""Sets the length of the control constraint window.
+
+        Parameters
+        ----------
+        n_ct_st : :class:`int`
+            Length of control constraint window.
+        
+        """
+        self.n_ct_u = n_ct_u
         
 
     def set_r_w(self, r_w):
@@ -1171,7 +1194,7 @@ class ConstrainedSystem:
         if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
         else: n_y = 1
 
-        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        n_p, n_c = self.n_p, self.n_c
         u_lim, x_lim = self.u_lim, self.x_lim
 
         if ref == 'constant':
@@ -1346,7 +1369,7 @@ class ConstrainedSystem:
         if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
         else: n_y = 1
 
-        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        n_p, n_c = self.n_p, self.n_c
         u_lim, x_lim = self.u_lim, self.x_lim
 
         if ref == 'constant':
@@ -1501,7 +1524,8 @@ class ConstrainedSystem:
         if self.constr_model.Cm.ndim != 1: n_y = self.constr_model.Cm.shape[0]
         else: n_y = 1
 
-        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
+        n_p, n_c = self.n_p, self.n_c
+        n_ct_st, n_ct_u = self.n_ct_st, self.n_ct_u
         u_lim, x_lim = self.u_lim, self.x_lim
 
         if ref == 'constant':
@@ -1559,7 +1583,8 @@ class ConstrainedSystem:
                   '\n/* Prediction, control and constraint horizon */\n'\
                   '#define {:}_NP\t\t\t{:}\n'.format(def_prefix, n_p)+\
                   '#define {:}_NC\t\t\t{:}\n'.format(def_prefix, n_c)+\
-                  '#define {:}_NR\t\t\t{:}\n'.format(def_prefix, n_r)+\
+                  '#define {:}_N_CT_ST\t\t\t{:}\n'.format(def_prefix, n_ct_st)+\
+                  '#define {:}_N_CT_U\t\t\t{:}\n'.format(def_prefix, n_ct_u)+\
                   '#define {:}_NLAMBDA\t\t{:}\n'.format(def_prefix, n_lambda)+\
                   '\n/* Number of inputs and outputs */\n'\
                   '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
