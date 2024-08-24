@@ -3,7 +3,7 @@ import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
 
-plt.ion()
+#plt.ion()
 
 # --- Model ---
 # Model parameters
@@ -22,24 +22,24 @@ fs = 100e3
 dt = 1 / fs
 
 # Optimization parameters
-r_w = 0.01
-n_p = 5
-n_c = 5
-n_r = 1
+rw = 0.01
+n_pred = 5
+n_ctl = 5
+n_cnt = 1
 
 # Constraints
 u_lim = [[0], [V_in]]
-x_lim = [[-12, -100], [12, 100]]
+x_lim = [[-10, None], [10, None]] # or None
 
 # Sim points
-n = 200
+n = 100
 
 # Reference
 r = 8
 
 # Initial conditions
-x_i = [0, 0, 0]
-u_i = 0
+xi = 0
+ui = 0
 
 # --- System ---
 # Model matrices
@@ -63,24 +63,36 @@ Cm = np.array([[0, 1]])
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
 # --- System ---
-sys = ctl.mpc.ConstrainedSystem(Ad, Bd, Cd, n_p=n_p, n_c=n_c, n_r=n_c, r_w=r_w, x_lim=x_lim, u_lim=u_lim)
+sys = ctl.mpc.System(Ad, Bd, Cd, n_pred=n_pred, n_ctl=n_ctl, n_cnt=n_cnt, rw=rw, x_lim=x_lim, u_lim=u_lim)
 
 # --- Sim with receding horizon ---
-data = sys.dmpc(x_i, u_i, r, n)
+data = sys.sim(xi, ui, r, n)
 
 # --- Plots ---
 t = dt * np.arange(n)
-#plt.ion()
-ax = plt.subplot(2,1,1)
+
+ax = plt.subplot(3,1,1)
+plt.title('Duty-cycle', fontsize=11)
 plt.step(t / 1e-3, data['u'], where='post')
-plt.xlabel('Time (ms)')
 plt.ylabel('Control')
+plt.gca().tick_params(labelbottom=False)
+plt.grid()
+plt.xlim([t[0]/1e-3, t[-1]/1e-3])
+
+plt.subplot(3,1,2, sharex=ax)
+plt.title('Inductor current', fontsize=11)
+plt.step(t / 1e-3, data['xm'][:, 0], where='post')
+plt.ylabel('Current (A)')
+plt.gca().tick_params(labelbottom=False)
 plt.grid()
 
-plt.subplot(2,1,2, sharex=ax)
-plt.step(t / 1e-3, data['x_m'], where='post')
+plt.subplot(3,1,3, sharex=ax)
+plt.title('Output voltage', fontsize=11)
+plt.step(t / 1e-3, data['y'], where='post')
+plt.ylabel('Voltage (V)')
 plt.xlabel('Time (ms)')
-plt.ylabel('States')
 plt.grid()
 
 plt.tight_layout()
+
+plt.show()

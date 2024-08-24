@@ -53,129 +53,6 @@ def aug(Am, Bm, Cm):
     return (A, B, C)
 
 
-def opt(A, B, C, x_i, r, r_w, n_p, n_c):
-    r"""Provides the control vector miniming the expression
-
-    .. :math:
-
-        J = (R_s - Y)^T(R_s - Y) + \Delta U^T R \Delta U.
-
-    Parameters
-    ----------
-    A : :class:`np.array`
-        The `A` matrix of the augmented model. An (n, n) numpy matrix.
-
-    B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, m) numpy matrix.
-
-    C : :class:`np.array`
-        The `B` matrix of the augmented model. An (q, n) numpy matrix.
-
-    x_i : :class:`np.array`
-        Initial conditions of the augmented states. An (n, 1) numpy matrix.
-
-    r : :class:`int`, :class:`float`
-        The set-point signal.
-
-    r_w : :class:`int`, :class:`float`, :class:`np.array`
-        Weight of the control action.
-
-    n_p : :class:`int`
-        Length of prediction horizon.
-
-    n_c : :class:`int`
-        Length of the control window.
-
-    Returns
-    -------
-    :class:`np.array`
-        An (n_c * m, 1) numpy matrix containing the optimal control values.
-
-    """
-    if type(r_w) is int or type(r_w) is float:
-        r_w = np.array([r_w])
-            
-    # Number of states
-    n = A.shape[0]
-
-    # Number of inputs
-    if B.ndim == 1:
-        m = 1
-    else:
-        m = B.shape[1]
-
-    # Number of outputs
-    if C.ndim == 1:
-        q = 1
-    else:
-        q = C.shape[0]
-
-    x_i = x_i.reshape(-1, 1)
-
-    R_s_bar = reference_matrix(q, n_p)
-
-    R = control_weighting_matrix(r_w, n_c)
-
-    F, Phi = opt_matrices(A, B, C, n_p, n_c)
-
-    Phi_t = Phi.T
-    DU = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ (R_s_bar - F @ x_i)
-    
-    return DU
-
-
-def predict_horizon(A, B, C, u, x_i, n_p):
-    r"""Predicts the system's response for a given control action and a given
-    horizon.
-
-    Parameters
-    ----------
-    A : :class:`np.array`
-        The `A` matrix of the augmented model. An (n, n) numpy matrix.
-
-    B : :class:`np.array`
-        The `B` matrix of the augmented model. An (n, m) numpy matrix.
-
-    C : :class:`np.array`
-        The `B` matrix of the augmented model. An (q, n) numpy matrix.
-
-    u : :class:`np.array`
-        The control values. An (n_c, 1) numpy matrix, where `n_c` is the
-        number of control actions.
-
-    x_i : :class:`np.array`
-        Initial conditions of the augmented states. An (n, 1) numpy matrix.
-
-    n_p : :class:`int`
-        Length of prediction horizon. Should be equal or greater than the
-        number of control actions.
-    
-    Returns
-    -------
-    (x, y) : :class:`tuple`
-        A tuple containing two numpy matrices. The first matrix contains the
-        state values `x` and the second matrix contains the output `y`.
-    
-    """
-    x_i = x_i.reshape(-1, 1)
-    n_c = u.shape[0]
-
-    x = np.zeros((n_p, x_i.shape[0]))
-    y = np.zeros((n_p, C.shape[0]))
-
-    x[0, :] = x_i.reshape(-1)
-    y[0, :] = C @ x[0, :]
-    for i in range(1, n_c):
-        x[i, :] = A @ x[i - 1, :] + B @ u[i - 1]
-        y[i, :] = C @ x[i, :]
-        
-    for i in range(n_c, n_p):
-        x[i, :] = A @ x[i - 1, :]
-        y[i, :] = C @ x[i, :]
-
-    return (x, y)
-
-
 def opt_matrices(A, B, C, n_p, n_c):
     r"""Computes the :math:`F` and :math:`Phi` matrices.
 
@@ -290,6 +167,76 @@ def reference_matrix(q, n_p):
     return R_s_bar
 
 
+def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
+    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
+    closed-loop system.
+
+    Parameters
+    ----------
+    A : :class:`np.array`
+        :math:`A` matrix. An (n, n) numpy matrix.
+
+    B : :class:`np.array`
+        :math:`B` matrix. An (n + q, m) numpy matrix.
+
+    C : :class:`np.array`
+        :math:`C_m` matrix. A (q, n) numpy matrix.
+
+    n_pred : :class:`int`
+        Length of prediction horizon.
+
+    n_ctl : :class:`NoneType`, :class:`int`
+        Length of the prediction horizon where the control input increments
+        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
+        `n_ctl` less than `n_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
+        assumed.
+
+    n_ctn : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints are enforced.
+        Note that `n_ctn` is less than or equal to `n_ctl`. If set to `None`,
+        `n_ctn = n_ctl` is assumed.
+    
+    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weighting factor for the control inputs.If set to `None`, `rw` is set
+        to zero.
+
+    Returns
+    -------
+    (Ky, K_mpc) : :class:`tuple`
+        A tuple, containing two elements. The first element is the vector
+        `Ky` and the second element is the vector `K_mpc`.
+
+    """    
+    # Number of states
+    n = A.shape[0]
+
+    # Number of inputs
+    if B.ndim == 1:
+        m = 1
+    else:
+        m = B.shape[1]
+
+    # Number of outputs
+    if C.ndim == 1:
+        q = 1
+    else:
+        q = C.shape[0]
+
+    Rs_bar = reference_matrix(q, n_pred)
+
+    R = control_weighting_matrix(rw, n_ctl)
+
+    F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
+    Phi_t = Phi.T
+    
+    K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
+    K_mpc = K @ F
+    Ky = K @ Rs_bar
+
+    return (Ky[:m], K_mpc[:m, :])
+
+
 class System:
     """A class to create a discrete-time system for model predictive control
     simulations.
@@ -305,144 +252,118 @@ class System:
     Cm : :class:`np.array`
         Model matrix :math:`C_m`. An (q, n) numpy matrix.
 
-    n_p : :class:`bool`, :class:`int`
-        Length of prediction horizon . Can be set later. By default, it is
-        `None`.
-
-    n_c : :class:`NoneType`, :class:`int`
-        Length of control window. Can be set later. By default, it is `None`.
-        
-    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
-        Weight of control action. Can be set later. By default, it is `None`.
-
-    Attributes
-    ----------
-    A : :class:`np.array`
-        Augmented model matrix :math:`A`.
-    
-    B : :class:`np.array`
-        Augmented model matrix :math:`B`.
-    
-    C : :class:`np.array`
-        Augmented model matrix :math:`C`.
-
-    Am : :class:`np.array`
-        Model matrix :math:`A_m`.
-    
-    Bm : :class:`np.array`
-        Model matrix :math:`B_m`.
-    
-    Cm : :class:`np.array`
-        Model matrix :math:`C_m`.
-    
-    n_p : :class:`bool`, :class:`int`
+    n_pred : :class:`int`
         Length of prediction horizon.
 
-    n_c : :class:`NoneType`, :class:`int`
-        Size of control window.
+    n_ctl : :class:`NoneType`, :class:`int`
+        Length of the prediction horizon where the control input increments
+        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
+        `n_ctl` less than `n_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
+        assumed.
 
-    r_w : :class:`NoneType`, :class:`int`, :class:`np.array`
-        Weight of control action.
+    n_cnt : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints are enforced.
+        Note that `n_cnt` is less than or equal to `n_ctl`. If set to `None`,
+        `n_cnt = n_ctl` is assumed.
     
+    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weighting factor for the control inputs. If set to `None`, `rw` is set
+        to zero.
+
+    q : :class:`NoneType`,  :class:`int`, :class:`np.array`
+        Weighting factor for frequency components of the control inputs.
+
+    x_lim : :class:`NoneType`, :class:`np.array`, :class:`list`
+        Lower and upper bounds of the states. If set to `None`, no constraints
+        are imposed on the states. 
+        
+    u_lim : :class:`NoneType`, :class:`np.array`, :class:`list`
+        Lower and upper bounds of the control signals. If set to`None`, no
+        constraints and set on the input signals.
+
     """
-    def __init__(self, Am, Bm, Cm, n_p=None, n_c=None, n_r=None, r_w=None):
-        self.A, self.B, self.C = ctl.mpc.aug(Am, Bm, Cm)
-        self.Am = Am
-        self.Bm = Bm
-        self.Cm = Cm
+    def __init__(self, Am, Bm, Cm, n_pred, n_ctl=None, n_cnt=None, rw=None, q=None, x_lim=None, u_lim=None):
 
-        self.n_p = n_p
-        self.n_c = n_c
-
-        if type(r_w) is int or type(r_w) is float:
-            r_w = np.array([r_w])
-        self.r_w = r_w
-
-        self.n_r = n_r
+        # System model and augmented model
+        self.Am = Am; self.Bm = Bm; self.Cm = Cm
         
+        self.A, self.B, self.C = aug(Am, Bm, Cm)
 
-    def model_matrices(self):
-        r"""Helper function that returns the matrices :math:`A_m`, :math:`B_m`
-        and :math:`C_m` of the plant model.
+        # Prediction horizon
+        self.n_pred = n_pred
 
-        Returns
-        -------
-        (Am, Bm, Cm) : :class:`tuple`
-            A tuple containing the three model matrices.
+        # Control horizon
+        if n_ctl is None:
+            self.n_ctl = n_pred
+        else:
+            self.n_ctl = n_ctl
+
+        # Constraints horizon
+        if n_cnt is None:
+            self.n_cnt = self.n_ctl
+        else:
+            self.n_cnt = n_cnt
+
+        # Weighting factor
+        if Bm.ndim == 1:
+            nu = 1
+        else:
+            nu = Bm.shape[1]
+            
+        if rw is None:
+            rw = np.zeros(nu)
         
-        """
-        return (self.Am, self.Bm, self.Cm)
+        elif type(rw) is int or type(rw) is float:
+            rw = rw * np.ones(nu)
 
+        self.rw = rw
 
-    def aug_matrices(self):
-        r"""Helper function that returns the matrices :math:`A`, :math:`B` and
-        :math:`C_m` of the augmented model.
-
-        Returns
-        -------
-        (A, B, C) : :class:`tuple`
-            A tuple containing the three matrices.
+        # Spectrum weighting factor
+        if type(q) is None:
+            q = 0.0
         
-        """
-        return (self.A, self.B, self.C)
+        if type(q) is int or type(q) is float:
+            r_w = np.array([q])
 
-
-    def set_predict_horizon(self, n_p):
-        r"""Sets the length of the predict horizon.
-
-        Parameters
-        ----------
-        n_p : :class:`int`
-            Length of prediction horizon.        
+        # Bounds
+        if type(x_lim) is list:
+            x_lim = np.array(x_lim)
+        if type(u_lim) is list:
+            u_lim = np.array(u_lim)
         
-        """
-        self.n_p = n_p
+        self.x_lim = x_lim
+        self.u_lim = u_lim
 
+        # Gains for unconstrained problem
+        n_xm = Am.shape[0]
+        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
+                                  self.n_pred, self.n_ctl, self.rw)
+        Kx = K_mpc[:, :n_xm]
 
-    def set_control_horizon(self, n_c):
-        r"""Sets the length of the control window.
+        self.Ky = Ky
+        self.Kx = Kx
 
-        Parameters
-        ----------
-        n_c : :class:`int`
-            Length of control window.
-        
-        """
-        self.n_c = n_c
-        
+        if (x_lim is not None) or (u_lim is not None):
+            # Initializes static qp matrices
+            self.gen_static_qp_matrices()
 
-    def set_r_w(self, r_w):
-        r"""Sets the weight for optimization of the control vector.
-
-        Parameters
-        ----------
-        r_w : :class:`int`, :class:`float`, :class:`np.array`
-            Weight.        
-        
-        """
-        if type(r_w) is int or type(r_w) is float:
-            r_w = np.array([r_w])
-        self.r_w = r_w
+            # Creates Hildreth's static matrix        
+            self.Hj = self.M @ self.Ej_inv @ self.M.T
 
     
-    def opt_cl_gains(self):
-        r"""Computes the optimum gains :math:`K_y` and :math:`K_{mpc}`.
+    def gen_static_qp_matrices(self):
+        """Sets constant matrices, to be used later by the optimization.
 
-        Returns
-        -------
-        (K_y, K_mpc) : :class:`tuple`
-            A tuple, containing two elements. The first element is the matrix
-            K_y and the second element is the matrix K_mpc.
+        """
+        A = self.A; B = self.B; C = self.C
+        Am = self.Am; Bm = self.Bm; Cm = self.Cm
+        n_pred = self.n_pred; n_ctl = self.n_ctl; n_cnt = self.n_cnt
+        rw = self.rw
 
-        """    
-        A, B, C = self.aug_matrices()
-        n_p = self.n_p
-        n_c = self.n_c
-        r_w = self.r_w
-
-        # Number of states
-        n = A.shape[0]
-
+        x_lim = self.x_lim
+        u_lim = self.u_lim
+                
         # Number of inputs
         if B.ndim == 1:
             m = 1
@@ -454,44 +375,194 @@ class System:
             q = 1
         else:
             q = C.shape[0]
-
-        R_s_bar = reference_matrix(q, n_p)
-
-        R = control_weighting_matrix(r_w, n_c)
-
-        F, Phi = ctl.mpc.opt_matrices(A, B, C, n_p, n_c)
-        Phi_t = Phi.T
         
-        K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
-        K_mpc = K @ F
-        K_y = K @ R_s_bar
+        R_bar = control_weighting_matrix(rw, n_ctl)
+        Rs_bar = reference_matrix(q, n_pred)
 
-        return (K_y[:m], K_mpc[:m, :])
-                
+        self.R_bar = R_bar
+        self.Rs_bar = Rs_bar
 
-    def dmpc(self, x_i, u_i, r, n, Bd=None, u_d=None):
-        """Simulates the MPC closed-loop system.
+        # Creates left-hand side inequality constraint, starting first with
+        # control inequality constraints
+        M = None
+        if u_lim is not None:
+            M_aux = np.tril( np.tile( np.eye(m), (n_cnt, n_ctl) ) )
+            Mu = np.concatenate((-M_aux, M_aux))
+            M = Mu
+
+        # Now, the state inequality constraints
+        if x_lim is not None:
+            n_state_ineq = 0
+            x_lim_new = [[], []]
+            Cx = None
+            
+            for i, xi in enumerate(x_lim[0]):
+                if xi is not None:
+                    x_lim_new[0].append(x_lim[0][i])
+                    x_lim_new[1].append(x_lim[1][i])
+                    
+                    n_state_ineq = n_state_ineq + 1
+                    
+                    cx = np.zeros((1, Am.shape[0]))
+                    cx[0, i] = 1
+                    
+                    if Cx is None:
+                        Cx = cx
+                    else:
+                        Cx = np.concatenate((Cx, cx))
+                        
+            Fx, Phi_x = opt_matrices(Am, Bm, Cx, n_cnt, n_ctl)
+            self.Fx = Fx; self.Phi_x = Phi_x
+            self.Cx = Cx
+            
+            self.x_lim = np.array(x_lim_new)
+
+            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_cnt, n_cnt) ) )
+            self.Mx_aux = M_aux
+            Mx = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
+
+            if M is None:
+                M = Mx
+            else:
+                M = np.concatenate((M, Mx))
+
+        self.M = M
+
+        # QP matrices
+        F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
+        self.F = F; self.Phi = Phi
+
+        Ej = Phi.T @ Phi + R_bar
+        Ej_inv = np.linalg.inv(Ej)
+        self.Ej = Ej; self.Ej_inv = Ej_inv
+
+
+    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
+        """Sets dynamic matrices, to be used later by the optimization.
+
+        """
+        n_cnt = self.n_cnt
+        F = self.F; Phi = self.Phi
+        Rs_bar = self.Rs_bar
+       
+        u_lim = self.u_lim
+        x_lim = self.x_lim
+
+        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+
+        # Creates the right-hand side inequality vector, starting first with
+        # the control inequality constraints
+        y = None
+        
+        if u_lim is not None:
+            u_min = np.tile(-u_lim[0] + ui, n_cnt).reshape(-1, 1)
+            u_max = np.tile( u_lim[1] - ui, n_cnt).reshape(-1, 1)
+
+            y = np.concatenate((u_min, u_max))
+
+        # Now, the state inequality constraints
+        if x_lim is not None:
+            Mx_aux = self.Mx_aux
+            Cx = self.Cx
+            Fx = self.Fx
+            M_Fx = Mx_aux @ Fx
+            x_min = np.tile(-x_lim[0] + Cx @ xm, n_cnt).reshape(-1, 1) + M_Fx @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - Cx @ xm, n_cnt).reshape(-1, 1) - M_Fx @ dx.reshape(-1, 1)
+
+            if y is None:
+                y = np.concatenate((x_min, x_max))
+            else:
+                y = np.concatenate((y, x_min, x_max))
+
+        return (Fj, y)
+
+
+    def opt(self, xm, dx, xa, ui, r, method='hild'):
+
+        nu = ui.shape[0]
+        
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+
+        du, n_iters = self.qp(Fj, y, method=method)
+
+        return (du[:nu], n_iters)
+
+    
+    def qp(self, Fj, y, method='hild'):
+        """Solver the QP problem given by:
+
+        .. :math:
+
+            J = \Delta U^T E_J \Delta U^T +  \Delta U^T F_j,
+
+        subject to:
+
+        .. :math:
+
+            M \Delta U \leq y.
+            
+        """
+        Ej = self.Ej; Ej_inv = self.Ej_inv
+
+        if method == 'hild':
+            M = self.M
+            F = self.F; Phi = self.Phi
+            
+            Hj = self.Hj
+            Kj = y + M @ Ej_inv @ Fj
+
+            lm, n_iters = ctl.qp.hild(Hj, Kj, n_iter=250, ret_n_iter=True)
+            lm = lm.reshape(-1, 1)
+            du_opt = -Ej_inv @ (Fj + M.T @ lm)
+            du_opt = du_opt.reshape(-1)
+
+        elif method == 'cvx':
+            du_opt = qps.cvxopt_solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1))
+            n_iters = 0
+
+        elif method == 'quadprog':
+            du_opt = qps.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1))
+            n_iters = 0
+
+        else:
+            du_opt = 0
+            n_iters = 0
+
+        return (du_opt, n_iters)
+    
+
+    def sim(self, xi, ui, r, n, Bd=None, ud=None):
+        """Simulates closed-loop system with the predictive controller.
 
         Parameters
         ----------
-        x_i : :class:`np.array`
-            The initial conditions. Should be an (n_x, 1) numpy matrix, where
-            `n_x` is the number of states of the model.
+        xi : :class:`int`, :class:`float`, :class:`list`, :class:`np.array`
+            Initial state conditions. Can be passed as a single value, list
+            or array, where each element corresponds the initial condition
+            of each state. If there are multiple states, and `xi` is a
+            single element, or a list with a single element, the initial
+            value of all states is set to `xi`.
 
-        u_i : :class:`np.array`
-            The value of the control action at u(-1).
+        ui : :class:`np.array`
+            Initial conditions for the control inputs. Can be passed as a
+            single value, list or array, where each element corresponds the
+            initial value of each input. If there are multiple states, and
+            `xi` is a single element, or a list with a single element, the
+            initial value of all states is set to `xi`.
 
         r : :class:`float`, :class:`np.array`
-            The set-point.
+            The set-point. If a single value, it is assumed constant for the
+            whole simulation. If a vector, each row is used at each step of
+            the simulation.
 
         n : :class:`int`
-            Length of simulation.
+            Number of points for the simulation.
 
         Bd : :class:`np.array`
             An (p, p) numpy matrix, where `p` is the number of disturbances.
             By default, it is `None`.
 
-        u_d : :class:`np.array`
+        ud : :class:`np.array`
             An (p, 1) or (p, n) numpy matrix, where `p` is the number of
             disturbances. If the second dimension is 1, the disturbance is
             considered to be constant during the entire period. Otherwise,
@@ -506,10 +577,18 @@ class System:
             and the key `y` contains the output.
 
         """
-        if type(x_i) is int or type(x_i) is float or type(x_i) is list:
-            x_i = np.array(x_i).reshape(1, -1)
-        elif type(x_i) is np.ndarray:
-            x_i = np.array(x_i).reshape(1, -1)
+        Am = self.Am; Bm = self.Bm; Cm = self.Cm
+        A = self.A; B = self.B; C = self.C
+
+        if type(xi) is int or type(xi) is float or type(xi) is list:
+            xi = np.array(xi).reshape(-1)
+        elif type(xi) is np.ndarray:
+            xi = np.array(xi).reshape(-1)
+
+        if type(ui) is int or type(ui) is float or type(ui) is list:
+            ui = np.array(ui).reshape(-1)
+        elif type(xi) is np.ndarray:
+            ui = np.array(ui).reshape(-1)
             
         if type(r) is int or type(r) is float:
             r = r * np.ones((n, 1))
@@ -518,321 +597,68 @@ class System:
         
         if type(r) is np.ndarray and r.ndim == 1:
             r = np.tile(r, (n, 1))
-            
-        Am, Bm, Cm = self.model_matrices()
-        A, B, C = self.aug_matrices()
-
-        n_xm = Am.shape[0]
-        n_x = A.shape[0]
-        n_y = C.shape[0]
-        n_u = B.shape[1]
         
-        x_m = np.zeros((n, n_xm))
-        x = np.zeros((n, n_x))
-        y = np.zeros((n, n_y))
+        n_xm = Am.shape[0]
+        nx = A.shape[0]
+        ny = C.shape[0]
+        nu = B.shape[1]
+        
+        xm = np.zeros((n, n_xm))
+        x = np.zeros((n, nx))
+        y = np.zeros((n, ny))
+        xa = np.zeros((A.shape[0], 1))
 
-        u = np.zeros((n, n_u))
+        u = np.zeros((n, nu))
 
-        x_m[0] = x_i[:, 0]
-        #dx = x_i[:, 1]
-        dx = 0
-        u[0] = u_i
+        xm[0] = xi
+        dx = xm[0]
+        u[0] = ui
 
-        K_y, K_mpc = self.opt_cl_gains()
-        K_x = K_mpc[:, :n_xm]
-
-        self.K_y = K_y
-        self.K_x = K_x
+        Ky = self.Ky
+        Kx = self.Kx
 
         if Bd is None:
             Bd = np.zeros(Bm.shape)
-            u_d = np.zeros(u.shape)
+            ud = np.zeros(u.shape)
         else:
-            if u_d.ndim == 1:
-                u_d = np.tile(u_d, (n, 1))
-                
+            if type(ud) is int or type(ud) is float or type(ud) is list:
+                ud = np.array(ud)
+            if ud.ndim == 1:
+                ud = np.tile(ud, (n, 1))
+
+        # Simulation
         for i in range(n - 1):
             # Updates the output and dx
-            y[i] = Cm @ x_m[i]
-            dx = x_m[i] - dx
+            y[i] = Cm @ xm[i]
+            dx = xm[i] - dx
 
             # Computes the control law for sampling instant i
-            du = -K_y @ (y[i] - r[i]) + -K_x @ dx
+            if (self.u_lim is None) and (self.x_lim is None):
+                du = -Ky @ (y[i] - r[i]) + -Kx @ dx
+            else:
+                xa[:n_xm, 0] = dx
+                xa[n_xm:, 0] = y[i]
+                du, _ = self.opt(xm[i], dx, xa, u[i], r[i]) 
+            
             u[i] = u[i] + du
 
             # Applies the control law
-            x_m[i + 1] = Am @ x_m[i] + Bm @ u[i] + Bd @ u_d[i]
+            xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
 
             # Update variables for next iteration
-            dx = x_m[i]
+            dx = xm[i]
             u[i + 1] = u[i]
 
         # Updates last value of y
-        y[n - 1] = Cm @ x_m[n - 1]
+        y[n - 1] = Cm @ xm[n - 1]
 
         results = {}
         results['u'] = u
-        results['x_m'] = x_m
+        results['xm'] = xm
         results['y'] = y
 
         return results
 
-
-class ConstrainedModel:
-    """A class to hold data from a constrained system.
-    
-    Parameters
-    ----------
-    Am : :class:`np.array`
-        Model matrix :math:`A_m`. An (n, n) numpy matrix.
-
-    Bm : :class:`np.array`
-        Model matrix :math:`B_m`. An (n, m) numpy matrix.
-
-    Cm : :class:`np.array`
-        Model matrix :math:`C_m`. An (q, n) numpy matrix.
-
-    n_p : :class:`int`
-        Length of prediction horizon.
-
-    n_c : :class:`int`
-        Length of the control window.
-
-    n_r : :class:`int`
-        Length of constraint window. 
-        
-    r_w : :class:`int`, :class:`float`, :class:`np.array`, :class:`list`
-        Weight of control action.
-
-    x_lim : :class:`np.array`, :class:`list`
-        Lower and upper bounds of the states.
-        
-    u_lim : :class:`np.array`, :class:`list`
-        Lower and upper bounds of the control signals.
-        
-    """
-    def __init__(self, Am, Bm, Cm, n_p, n_c, n_r, r_w, x_lim, u_lim):
-
-        self.Am, self.Bm, self.Cm = Am, Bm, Cm
-        self.A, self.B, self.C = aug(Am, Bm, Cm)
-        
-        self.n_p, self.n_c, self.n_r = n_p, n_c, n_r
-        self.r_w = r_w 
-
-        if type(r_w) is int or type(r_w) is float:
-            r_w = np.array([r_w])
-        elif type(r_w) is list:
-            r_w = np.array(r_w)
-
-        if type(u_lim) is int or type(u_lim) is float:
-            u_lim = np.array([u_lim])
-        elif type(u_lim) is list:
-            u_lim = np.array(u_lim)
-
-        if type(x_lim) is int or type(x_lim) is float:
-            x_lim = np.array([x_lim])
-        elif type(x_lim) is list:
-            x_lim = np.array(x_lim)
-            
-        self.u_lim = u_lim
-        self.x_lim = x_lim
-
-        self.const_matrices()
-    
-
-    def const_matrices(self):
-        """Sets constant matrices, to be used later by the optimization.
-
-        """
-        A, B, C = self.A, self.B, self.C
-        Am, Bm, Cm = self.Am, self.Bm, self.Cm
-        n_p, n_c, n_r = self.n_p, self.n_c, self.n_r
-        r_w = self.r_w
-
-        x_lim = self.x_lim
-        u_lim = self.u_lim
-                
-        # Number of inputs
-        if B.ndim == 1:
-            m = 1
-        else:
-            m = B.shape[1]
-
-        # Number of outputs
-        if C.ndim == 1:
-            q = 1
-        else:
-            q = C.shape[0]
-        
-        R_bar = control_weighting_matrix(r_w, n_c)
-        R_s_bar = reference_matrix(q, n_p)
-
-        self.R_bar = R_bar
-        self.R_s_bar = R_s_bar
-
-        # Creates left-hand side inequality constraint, starting first with
-        # control inequality constraints
-        M = None
-        if u_lim is not None:
-            M_aux = np.tril( np.tile( np.eye(m), (n_r, n_c) ) )
-            M_u = np.concatenate((-M_aux, M_aux))
-            M = M_u
-
-        # Now, the state inequality constraints
-        if x_lim is not None:
-            n_state_ineq = 0
-            x_lim_new = [[], []]
-            C_x = None
-            
-            for i, x_i in enumerate(x_lim[0]):
-                if x_i is not None:
-                    x_lim_new[0].append(x_lim[0][i])
-                    x_lim_new[1].append(x_lim[1][i])
-                    
-                    n_state_ineq = n_state_ineq + 1
-                    
-                    cx = np.zeros((1, Am.shape[0]))
-                    cx[0, i] = 1
-                    
-                    if C_x is None:
-                        C_x = cx
-                    else:
-                        C_x = np.concatenate((C_x, cx))
-                        
-            F_x, Phi_x = opt_matrices(Am, Bm, C_x, n_r, n_c)
-            self.F_x, self.Phi_x = F_x, Phi_x
-            self.C_x = C_x
-            
-            self.x_lim = np.array(x_lim_new)
-
-            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_r, n_r) ) )
-            self.M_x_aux = M_aux
-            M_x = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
-
-            if M is None:
-                M = M_x
-            else:
-                M = np.concatenate((M, M_x))
-
-        # If there were no constraints, creates an empty matrix
-        if M is None:
-            M = np.zeros((1, m * n_r ))
-        
-        # Saves M matrix only after creating all constraints
-        self.M = M
-
-        # QP matrices
-        F, Phi = opt_matrices(A, B, C, n_p, n_c)
-        self.F, self.Phi = F, Phi
-
-        E_j = Phi.T @ Phi + R_bar
-        E_j_inv = np.linalg.inv(E_j)
-        self.E_j, self.E_j_inv = E_j, E_j_inv
-
-
-    def dyn_matrices(self, xm, dx, xa, u_i, r):
-        """Sets dynamic matrices, to be used later by the optimization.
-
-        """
-        n_r = self.n_r
-        F, Phi = self.F, self.Phi
-        R_s_bar = self.R_s_bar
-       
-        u_lim = self.u_lim
-        x_lim = self.x_lim
-
-        F_j = -Phi.T @ (R_s_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
-
-        # Creates the right-hand side inequality vector, starting first with
-        # the control inequality constraints
-        y = None
-        
-        if u_lim is not None:
-            u_min = np.tile(-u_lim[0] + u_i, n_r).reshape(-1, 1)
-            u_max = np.tile( u_lim[1] - u_i, n_r).reshape(-1, 1)
-
-            y = np.concatenate((u_min, u_max))
-
-        # Now, the state inequality constraints
-        if x_lim is not None:
-            M_x_aux = self.M_x_aux
-            C_x = self.C_x
-            F_x = self.F_x
-            M_F_x = M_x_aux @ F_x
-            x_min = np.tile(-x_lim[0] + C_x @ xm, n_r).reshape(-1, 1) + M_F_x @ dx.reshape(-1, 1)
-            x_max = np.tile( x_lim[1] - C_x @ xm, n_r).reshape(-1, 1) - M_F_x @ dx.reshape(-1, 1)
-
-            if y is None:
-                y = np.concatenate((x_min, x_max))
-            else:
-                y = np.concatenate((y, x_min, x_max))
-
-        # If there were no constraints, creates a zero vector
-        if y is None:
-            y = np.zeros(1)
-
-        return (F_j, y)
-
-
-    def opt(self, xm, dx, xa, u_i, r):
-
-        n_u = u_i.shape[0]
-        
-        F_j, y = self.dyn_matrices(xm, dx, xa, u_i, r)
-
-        du, n_iters = self.qp(F_j, y, method='hild')
-
-        return (du[:n_u], n_iters)
-
-    
-    def qp(self, F_j, y, method='hild'):
-        """Solver the QP problem given by:
-
-        .. :math:
-
-            J = \Delta U^T E_J \Delta U^T +  \Delta U^T F_j,
-
-        subject to:
-
-        .. :math:
-
-            M \Delta U \leq y.
-            
-        """
-        E_j, E_j_inv = self.E_j, self.E_j_inv
-        M = self.M
-        F, Phi = self.F, self.Phi
-
-        H_j = M @ E_j_inv @ M.T
-        K_j = y + M @ E_j_inv @ F_j
-        self.H_j = H_j
-        self.K_j = K_j
-        #print(K_j.reshape(-1))
-
-        if method == 'hild':
-            if self.x_lim is None and self.u_lim is None:
-                du_opt = (-E_j_inv @ F_j).reshape(-1)
-            else:
-                lm, n_iters = ctl.qp.hild(H_j, K_j, n_iter=100, ret_n_iter=True)
-                lm = lm.reshape(-1, 1)
-                du_opt = -E_j_inv @ (F_j + M.T @ lm)
-                du_opt = du_opt.reshape(-1)
-                #print(lm)
-                #print(n_iters)
-                #print('\n')
-
-        elif method == 'cvx':
-            du_opt = qps.cvxopt_solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
-            n_iters = 0
-        elif method == 'quadprog':
-            du_opt = qps.solve_qp(E_j, F_j.reshape(-1), M, y.reshape(-1))
-            n_iters = 0
-
-        else:
-            du_opt = 0
-            n_iters = 0
-
-        return (du_opt, n_iters)
 
 
 class ConstrainedSystem:
