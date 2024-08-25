@@ -351,6 +351,8 @@ class System:
             # Creates Hildreth's static matrix        
             self.Hj = self.M @ self.Ej_inv @ self.M.T
 
+        self.c_gen = c_gen()
+
     
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
@@ -390,9 +392,15 @@ class System:
             Mu = np.concatenate((-M_aux, M_aux))
             M = Mu
 
+            # TODO: possibility to constraint only certain inputs
+            # For now, we assume that all controls are constrained
+            u_lim_idx = np.arange(len(u_lim[0]))
+            self.u_lim_idx = u_lim_idx
+
         # Now, the state inequality constraints
         if x_lim is not None:
             n_state_ineq = 0
+            x_lim_idx = []
             x_lim_new = [[], []]
             Cx = None
             
@@ -400,6 +408,7 @@ class System:
                 if xi is not None:
                     x_lim_new[0].append(x_lim[0][i])
                     x_lim_new[1].append(x_lim[1][i])
+                    x_lim_idx.append(i)
                     
                     n_state_ineq = n_state_ineq + 1
                     
@@ -416,6 +425,7 @@ class System:
             self.Cx = Cx
             
             self.x_lim = np.array(x_lim_new)
+            self.x_lim_idx = np.array(x_lim_idx)
 
             M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_cnt, n_cnt) ) )
             self.Mx_aux = M_aux
@@ -435,6 +445,15 @@ class System:
         Ej = Phi.T @ Phi + R_bar
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
+
+        # Creates index vector of outputs
+        y_idx = []
+        if Cm.ndim != 1:
+            Cm = np.sum(Cm, axis=0)
+        for i, yi in enumerate(Cm):
+            if np.abs(yi) > 0.5: y_idx.append(i)
+
+        self.y_idx = np.array(y_idx)
 
 
     def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
@@ -529,6 +548,38 @@ class System:
             n_iters = 0
 
         return (du_opt, n_iters)
+
+
+    def hild_matrices(self, ref='constant'):
+
+        if self.Bm.ndim == 1:
+            m = 1
+        else:
+            m = self.Bm.shape[1]
+        
+        if ref == 'constant':
+            Fj1 = -self.Phi.T @ self.Rs_bar
+        else:
+            Fj1 = -self.Phi.T
+        Fj2 = self.Phi.T @ self.F
+
+        Kj1 = self.M @ self.Ej_inv
+
+        if self.x_lim is None:
+            Fx = np.zeros((1,1))
+        else:
+            Fx = self.Mx_aux @ self.Fx
+
+        Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
+        Hj[:] = self.Hj[:]
+        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+
+        #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
+        
+        DU1 = (-self.Ej_inv)[:m, :]
+        DU2 = (-self.Ej_inv @ self.M.T)[:m, :]
+
+        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
     
 
     def sim(self, xi, ui, r, n, Bd=None, ud=None):
@@ -659,6 +710,66 @@ class System:
 
         return results
 
+
+    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src'):
+
+        # Matrices for Hildreth's QP procedure
+        (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
+        
+        header = self.c_gen.header(ftype=ftype)
+
+        includes, end = self.c_gen.includes(ftype=ftype)
+
+        in_cnt = self.c_gen.cnt(self.u_lim, self.u_lim_idx, cnt='input', ftype=ftype)
+        st_cnt = self.c_gen.cnt(self.x_lim, self.x_lim_idx, cnt='state', ftype=ftype)        
+
+        out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype)
+
+        pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype)
+
+        qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype)
+
+        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype)
+        
+        txt = header + includes + in_cnt + st_cnt +\
+              out_idx + pred_matrices + qp_matrices + hild_matrices +\
+              end
+
+        return txt
+    
+
+    def export(self, file_path='.', scaling=1.0, Bd=None, ref='constant'):
+
+        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
+
+        txt_src = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src')
+        txt_header = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header')
+
+
+        n_xm = self.Am.shape[0]
+        n_xa = self.A.shape[0]
+        n_pred = self.n_pred
+        n_ctl = self.n_ctl
+        n_cnt = self.n_cnt
+        n_lambda = self.M.shape[0]
+
+        self.c_gen.defs_header(n_xm, n_xa,
+                               n_pred, n_ctl, n_cnt, n_lambda,
+                               scaling=scaling)
+        
+        #text_defs   = self._export_gen_defs(scaling=scaling, Bd=Bd, ref=ref)
+        #if file_path is not None:
+        #    with open(file_path + prefix + 'dmpc_matrices.c', 'w') as efile:
+        #        efile.write(text_source)
+        #    with open(file_path + prefix + 'dmpc_matrices.h', 'w') as efile:
+        #        efile.write(text_header)
+        #    with open(file_path + 'dmpc_defs.h', 'w') as efile:
+        #        efile.write(text_defs)
+                
+        np.set_printoptions(floatmode='fixed', threshold=1000)
+
+        self.txt_src = txt_src
+        self.txt_header = txt_header
 
 
 class ConstrainedSystem:
@@ -1478,3 +1589,421 @@ class ConstrainedSystem:
         np.set_printoptions(floatmode='fixed', threshold=1000)
         #np.set_printoptions(threshold=1000)
         #np.set_printoptions(floatmode='maxprec_equal')
+
+class c_gen:
+
+    def __init__(self):
+        pass
+    
+    def _export_np_array_to_c(self, arr, arr_name, fill=True):
+
+        if arr.ndim == 1:
+            n = arr.shape[0]
+            m = 1
+        else:
+            if (arr.shape[0] == 1) or (arr.shape[1] == 1):
+                arr = arr.flatten()
+                n = arr.shape[0]
+                m = 1
+            else:
+                n, m = arr.shape
+
+        arr_str = np.array2string(arr, separator=',')
+        arr_str = arr_str.replace('[', '{')
+        arr_str = arr_str.replace(']', '}')
+
+        if m == 1:
+            arr_txt = '{:}[{:}];'.format(arr_name, n)
+        else:
+            arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
+
+        if fill is True:
+            arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
+            
+        return arr_txt
+    
+
+    def header(self, ftype='src', prefix=None):
+
+        header = '/**\n'\
+         ' * @file {:}\n'\
+         ' * @brief Header with data to run the DMPC algorithm.\n'\
+         ' *\n'\
+         ' * This file is generated automatically and should not be modified.\n'\
+         ' *\n'\
+         ' * The Hj matrix is already generated by flipping the sign and inverting its\n'\
+         ' * diagonal elements, so that Hildreth\'s algorithm does not require any \n'\
+         ' * divisions.\n'\
+         ' *\n'\
+         ' */\n'
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix + '_'
+        
+        if ftype == 'src':
+            file = 'dmpc_matrices.c'
+        else:
+            file = 'dmpc_matrices.h'
+            
+        header = header.format(prefix + file)
+
+        return header
+
+
+    def includes(self, ftype='src', prefix=None):
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix + '_'
+
+        file = 'dmpc_matrices'
+
+        if ftype == 'src':
+            txt = '\n#include "{:}"\n'.format(prefix + file + '.h')
+            guard_end = ''
+        else:
+            def_guard = prefix.upper() + file.upper() + '_H_'
+            if prefix is not None: def_guard = def_guard
+
+            def_guard_txt = '#ifndef {:}\n'\
+                        '#define {:}\n'
+            def_guard_txt = def_guard_txt.format(def_guard, def_guard)   
+
+            include_header = '\n#include "stdint.h"\n'
+
+            txt = '\n' + def_guard_txt + include_header
+
+            guard_end = '\n#endif /* {:} */\n'.format(def_guard)
+
+        return txt, guard_end
+
+
+    def cnt(self, lim, idx, scaling=1.0, cnt='input', ftype='src', prefix=None):
+
+        if lim is None:
+            return ''
+        
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        extern = ''
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+
+        cnt_txt = 'U'
+        comment = '/* Input constraints */\n'
+        if cnt != 'input':
+            cnt_txt = 'XM'
+            comment = '/* State constraints */\n'
+        
+        min_txt = extern + 'float {:}{:}_MIN'.format(prefix, cnt_txt)
+        max_txt = extern + 'float {:}{:}_MAX'.format(prefix, cnt_txt)
+        lim_idx_txt = extern + 'uint32_t {:}{:}_LIM_IDX'.format(prefix, cnt_txt)
+
+        min_txt = self._export_np_array_to_c(lim[0] / scaling, min_txt, fill=fill) + '\n'
+        max_txt = self._export_np_array_to_c(lim[1] / scaling, max_txt, fill=fill) + '\n'
+        lim_idx_txt = self._export_np_array_to_c(idx, lim_idx_txt, fill=fill) + '\n'
+
+        txt = '\n' + comment + min_txt + max_txt + lim_idx_txt
+        
+        return txt
+
+
+    def output_idx(self, idx, ftype='src', prefix=None):
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        extern = ''
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+
+        comment = '/* Index of ouputs */\n'
+        y_idx_txt = extern + 'uint32_t {:}Y_IDX'.format(prefix)
+
+        idx_txt = self._export_np_array_to_c(idx, y_idx_txt, fill=fill) + '\n'
+
+        txt = '\n' + comment + idx_txt
+        
+        return txt
+
+
+    def Am_Bm_matrices_pred(self, Am, Bm, Bd=None, ftype='src', prefix=None):
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        nl = '\n'
+        extern = ''
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+            nl = ''
+
+        if Bd is not None:
+            B = np.concatenate((Bm, Bd), axis=1)
+        else:
+            B = Bm
+        
+        comment = '/*\n'\
+                  ' * A and B matrices for prediction.\n'\
+                  ' * A corresponds to model matrix Am.\n'\
+                  ' * B corresponds to model matrix Bm concatenated with Bd, if Bd exists.\n'\
+                  '*/\n'
+
+        A_txt = extern + 'float {:}A'.format(prefix)
+        B_txt = extern + 'float {:}B'.format(prefix)
+
+        A_txt = self._export_np_array_to_c(Am, A_txt, fill=fill) + '\n'
+        B_txt = self._export_np_array_to_c(B, B_txt, fill=fill) + '\n'
+
+        txt = '\n' + comment + A_txt + nl + B_txt
+        
+        return txt
+
+
+    def qp_matrices(self, Ej, M, ftype='src', prefix=None):
+
+        n = Ej.shape[0]
+        m = M.shape[0]
+        
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        extern = ''
+        nl = '\n'
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+            nl = ''
+
+        comment = '\n/*\n * Matrices for QP solvers \n'\
+                   ' *\n'\
+                   ' * The matrices were generated considering the following problem:\n'\
+                   ' *\n'\
+                   ' * min (1/2) * DU\' * Ej * DU + DU\' * Fj\n'\
+                   ' * DU\n'\
+                   ' *\n'\
+                   ' * s.t. M * DU <= gam\n'\
+                   ' *\n'\
+                   ' * The (1/2) term in from of DU\' * Ej * DU needs to be considered in the QP\n'\
+                   ' * solver selected, or the solution will appear to be inconsistent.\n'\
+                   ' * Note that the Fj and gam matrices are usually updated online, while Ej\n'\
+                   ' * and M are static.\n'\
+                   ' */\n'
+
+        Ej_txt = extern + 'float {:}Ej'.format(prefix)
+        Fj_txt = nl + extern + 'float {:}Fj'.format(prefix)
+
+        M_txt = nl + extern + 'float {:}M'.format(prefix)
+        gam_txt = nl + extern + 'float {:}gam'.format(prefix)
+
+        # Generates dummy matrices for Fj and gam, since they are updated
+        # at every iteration.
+        Fj = np.zeros(n)
+        gam = np.zeros(m)
+        
+        Ej_txt = self._export_np_array_to_c(Ej, Ej_txt, fill=fill) + '\n'
+        Fj_txt = self._export_np_array_to_c(Fj, Fj_txt, fill=False) + '\n'
+
+        M_txt = self._export_np_array_to_c(M, M_txt, fill=fill) + '\n'
+        gam_txt = self._export_np_array_to_c(gam, gam_txt, fill=False) + '\n'
+
+        txt = comment + Ej_txt + Fj_txt + M_txt + gam_txt
+
+        return txt
+    
+
+    def hild_matrices(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
+        
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        extern = ''
+        nl = '\n'
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+            nl = ''
+
+        comments = '\n/* Matrices for Hildreth\'s QP procedure */\n'
+        
+        Fj1_txt = extern + 'float {:}Fj_1'.format(prefix)
+        Fj1_txt = self._export_np_array_to_c(Fj1, Fj1_txt, fill=fill) + '\n'
+        
+        Fj2_txt = nl + extern + 'float {:}Fj_2'.format(prefix)
+        Fj2_txt = self._export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
+        
+        Fx_txt = nl + extern + 'float {:}Fx'.format(prefix)
+        Fx_txt = self._export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
+        
+        Kj1_txt = nl + extern + 'float {:}Kj_1'.format(prefix)
+        Kj1_txt = self._export_np_array_to_c(Kj1, Kj1_txt, fill=fill) + '\n'
+        
+        Hj_txt = nl + extern + 'float {:}Hj'.format(prefix)
+        Hj_txt = self._export_np_array_to_c(Hj, Hj_txt, fill=fill) + '\n'
+        
+        DU1_txt = nl + extern + 'float {:}DU_1'.format(prefix)
+        DU1_txt = self._export_np_array_to_c(DU1, DU1_txt, fill=fill) + '\n'
+        
+        DU2_txt = nl + extern + 'float {:}DU_2'.format(prefix)
+        DU2_txt = self._export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
+
+        txt = comments + \
+              Fj1_txt + Fj2_txt + Fx_txt +\
+              Kj1_txt + Hj_txt + DU1_txt + DU2_txt
+        
+        return txt
+
+
+    def defs_header(self, n_xm, n_xa, n_pred, n_ctl, n_cnt, n_lambda, scaling=1.0, prefix=None):
+
+        header = '/**\n'\
+         ' * @file {:}\n'\
+         ' * @brief Header with definitions to aid the DMPC algorithm.\n'\
+         ' *\n'\
+         ' * This file is generated automatically and should not be modified.\n'\
+         ' *\n'\
+         ' */\n'
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix + '_'
+        
+        file = prefix + 'dmpc_defs'
+
+        tab = '{:<16}'
+        
+        header = header.format(file + '.h')
+
+        def_guard = file.upper() + '_H_'
+
+        def_guard_txt = '\n#ifndef {:}\n'\
+                    '#define {:}\n'
+        def_guard_txt = def_guard_txt.format(def_guard, def_guard)
+
+        guard_end = '\n#endif /* {:} */\n'.format(def_guard)
+
+        scale_txt = (tab + '{:f}f').format(prefix.upper() + 'CFG_SCALE', scaling)
+        scale_txt = '\n/* Scaling factor */\n'\
+                     '#define {:}\n'.format(scale_txt)
+
+        n_xm_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NXM', n_xm)
+        n_xa_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NXA', n_xa)
+        n_states_txt = '\n/* Number of model states and augmented states */\n'+\
+                       '#define {:}\n'.format(n_xm_txt)+\
+                       '#define {:}\n'.format(n_xa_txt)
+
+        n_pred_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NP', n_pred)
+        n_ctl_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NC', n_ctl)
+        n_cnt_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NR', n_cnt)
+        n_lambda_txt = (tab + '{:}').format(prefix.upper() + 'CFG_NLAMBDA', n_lambda)
+
+        n_hor_txt = '\n/* Prediction, control and constraint horizon */\n'+\
+                    '#define {:}\n'.format(n_pred_txt)+\
+                    '#define {:}\n'.format(n_ctl_txt)+\
+                    '#define {:}\n'.format(n_cnt_txt)+\
+                    '#define {:}\n'.format(n_lambda_txt)
+        
+        print(n_hor_txt)
+
+##        def_prefix = 'DMPC_CONFIG'
+##
+##        defines ='\n/* Scaling factor */\n'\
+##                  '#define {:}_SCALE\t\t\t{:f}f\n'.format(def_prefix, scaling)+\
+##                  '\n/* Number of model states and augmented states */\n'\
+##                  '#define {:}_NXM\t\t\t{:}\n'.format(def_prefix, n_s)+\
+##                  '#define {:}_NXA\t\t\t{:}\n'.format(def_prefix, n_as)+\
+##                  '\n/* Prediction, control and constraint horizon */\n'\
+##                  '#define {:}_NP\t\t\t{:}\n'.format(def_prefix, n_p)+\
+##                  '#define {:}_NC\t\t\t{:}\n'.format(def_prefix, n_c)+\
+##                  '#define {:}_NR\t\t\t{:}\n'.format(def_prefix, n_r)+\
+##                  '#define {:}_NLAMBDA\t\t{:}\n'.format(def_prefix, n_lambda)+\
+##                  '\n/* Number of inputs and outputs */\n'\
+##                  '#define {:}_NU\t\t\t{:}\n'.format(def_prefix, n_u)+\
+##                  '#define {:}_NY\t\t\t{:}\n'.format(def_prefix, n_y)+\
+##                  '\n/* Number of external disturbances */\n'\
+##                  '#define {:}_ND\t\t\t{:}\n'.format(def_prefix, n_d)+\
+##                  '\n/* Size of control vector */\n'\
+##                  '#define {:}_NC_x_NU\t\t{:}_NC * {:}_NU\n'.format(def_prefix, def_prefix, def_prefix)
+##        text = text + defines
+##
+##        if u_lim is not None:
+##            idx = []
+##            for i, xi in enumerate(u_lim[0]):
+##                if xi != None:
+##                    idx.append(i)
+##            idx = np.array(idx)
+##
+##        u_lim_sz = idx.shape[0]
+##        u_min_text = self._export_np_array_to_c(u_lim[0] / scaling, 'extern float {:}_U_MIN'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+##        u_max_text = self._export_np_array_to_c(u_lim[1] / scaling, 'extern float {:}_U_MAX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+##        x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_U_LIM_IDX'.format(def_prefix, u_lim_sz), fill=False) + '\n'
+##          
+##        constraints = '\n/* Input constraints */\n'+\
+##                      '#define {:}_NU_CTR\t\t{:}\n'.format(def_prefix, u_lim_sz)
+##        text = text + constraints
+##
+##        if x_lim is not None:
+##            idx = []
+##            for i, xi in enumerate(x_lim[0]):
+##                if xi != None:
+##                    idx.append(i)
+##            idx = np.array(idx)
+##
+##            x_lim_sz = idx.shape[0]
+##            x_min_text = self._export_np_array_to_c(x_lim[0][idx] / scaling, 'extern float {:}_XM_MIN'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+##            x_max_text = self._export_np_array_to_c(x_lim[1][idx] / scaling, 'extern float {:}_XM_MAX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+##            x_lim_idx_text = self._export_np_array_to_c(idx, 'extern uint32_t {:}_XM_LIM_IDX'.format(def_prefix, x_lim_sz), fill=False) + '\n'
+##            
+##            constraints = '\n/* State constraints */\n'+\
+##                          x_min_text+\
+##                          x_max_text+\
+##                          x_lim_idx_text
+##        else:
+##           
+##            constraints = '\n/* State constraints */\n'+\
+##                          ' '
+##        if x_lim is not None:
+##            constraints = '\n/* State constraints */\n'+\
+##                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, x_lim_sz)
+##        else:
+##            constraints = '\n/* State constraints */\n'+\
+##                          '#define {:}_NXM_CTR\t\t{:}\n'.format(def_prefix, 0)
+##            
+##        text = text + constraints
+##
+##        idx = []
+##        if Cm.ndim != 1:
+##            Cm = np.sum(Cm, axis=0)
+##        for i, yi in enumerate(Cm):
+##            if np.abs(yi) > 0.5: idx.append(i)
+##        idx = np.array(idx)
+##        outputs_sz = idx.shape[0]
+##        outputs_idx_text = self._export_np_array_to_c(idx, 'uint32_t {:}_Y_IDX'.format(def_prefix, outputs_sz)) + '\n'
+##
+##        def_guard_end = '\n#endif /* DMPC_DEFS_H_ */\n'
+##        text = text + def_guard_end
+        
+        return header
