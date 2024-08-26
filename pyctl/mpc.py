@@ -715,25 +715,25 @@ class System:
         return results
 
 
-    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src'):
+    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
 
         # Matrices for Hildreth's QP procedure
         (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
         
-        header = self.c_gen.header(ftype=ftype)
+        header = self.c_gen.header(ftype=ftype, prefix=prefix)
 
-        includes, end = self.c_gen.includes(ftype=ftype)
+        includes, end = self.c_gen.includes(ftype=ftype, prefix=prefix)
 
-        in_cnt = self.c_gen.cnt(self.u_lim, self.u_lim_idx, cnt='input', ftype=ftype)
-        st_cnt = self.c_gen.cnt(self.x_lim, self.x_lim_idx, cnt='state', ftype=ftype)        
+        in_cnt = self.c_gen.cnt(self.u_lim / scaling, self.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
+        st_cnt = self.c_gen.cnt(self.x_lim / scaling, self.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
 
-        out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype)
+        out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype, prefix=prefix)
 
-        pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype)
+        pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
 
-        qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype)
+        qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype, prefix=prefix)
 
-        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype)
+        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
         
         txt = header + includes + in_cnt + st_cnt +\
               out_idx + pred_matrices + qp_matrices + hild_matrices +\
@@ -742,7 +742,7 @@ class System:
         return txt
     
 
-    def _gen_defs(self, scaling=1.0, Bd=None):
+    def _gen_defs(self, scaling=1.0, Bd=None, prefix=None):
         
         n_xm = self.Am.shape[0]
         n_xa = self.A.shape[0]
@@ -780,7 +780,8 @@ class System:
         defs = self.c_gen.defs_header(n_xm, n_xa, ny, nu, nd,
                                n_pred, n_ctl, n_cnt, n_lambda,
                                n_in_cnt, n_st_cnt,
-                               scaling=scaling)
+                               scaling=scaling,
+                               prefix=prefix)
 
         return defs
 
@@ -795,16 +796,16 @@ class System:
 
         np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
 
-        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src')
-        header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header')
-        defs_txt = self._gen_defs(scaling=scaling, Bd=Bd)
+        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
+        header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
+        defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
 
         if file_path is not None:
-            with open(file_path + 'dmpc_matrices.c', 'w') as efile:
+            with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
                 efile.write(src_txt)
-            with open(file_path + 'dmpc_matrices.h', 'w') as efile:
+            with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:
                 efile.write(header_txt)
-            with open(file_path + 'dmpc_defs.h', 'w') as efile:
+            with open(file_path + file_prefix + 'dmpc_defs.h', 'w') as efile:
                 efile.write(defs_txt)
                 
         np.set_printoptions(floatmode='fixed', threshold=1000)
@@ -985,8 +986,8 @@ class c_gen:
                   ' * B corresponds to model matrix Bm concatenated with Bd, if Bd exists.\n'\
                   '*/\n'
 
-        A_txt = extern + 'float {:}A'.format(prefix)
-        B_txt = extern + 'float {:}B'.format(prefix)
+        A_txt = extern + 'float {:}DMPC_M_A'.format(prefix)
+        B_txt = extern + 'float {:}DMPC_M_B'.format(prefix)
 
         A_txt = self._export_np_array_to_c(Am, A_txt, fill=fill) + '\n'
         B_txt = self._export_np_array_to_c(B, B_txt, fill=fill) + '\n'
@@ -1029,11 +1030,11 @@ class c_gen:
                    ' * and M are static.\n'\
                    ' */\n'
 
-        Ej_txt = extern + 'float {:}Ej'.format(prefix)
-        Fj_txt = nl + extern + 'float {:}Fj'.format(prefix)
+        Ej_txt = extern + 'float {:}DMPC_M_Ej'.format(prefix)
+        Fj_txt = nl + extern + 'float {:}DMPC_M_Fj'.format(prefix)
 
-        M_txt = nl + extern + 'float {:}M'.format(prefix)
-        gam_txt = nl + extern + 'float {:}gam'.format(prefix)
+        M_txt = nl + extern + 'float {:}DMPC_M_M'.format(prefix)
+        gam_txt = nl + extern + 'float {:}DMPC_M_gam'.format(prefix)
 
         # Generates dummy matrices for Fj and gam, since they are updated
         # at every iteration.
@@ -1068,25 +1069,25 @@ class c_gen:
 
         comments = '\n/* Matrices for Hildreth\'s QP procedure */\n'
         
-        Fj1_txt = extern + 'float {:}Fj_1'.format(prefix)
+        Fj1_txt = extern + 'float {:}DMPC_M_Fj_1'.format(prefix)
         Fj1_txt = self._export_np_array_to_c(Fj1, Fj1_txt, fill=fill) + '\n'
         
-        Fj2_txt = nl + extern + 'float {:}Fj_2'.format(prefix)
+        Fj2_txt = nl + extern + 'float {:}DMPC_M_Fj_2'.format(prefix)
         Fj2_txt = self._export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
         
-        Fx_txt = nl + extern + 'float {:}Fx'.format(prefix)
+        Fx_txt = nl + extern + 'float {:}DMPC_M_Fx'.format(prefix)
         Fx_txt = self._export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
         
-        Kj1_txt = nl + extern + 'float {:}Kj_1'.format(prefix)
+        Kj1_txt = nl + extern + 'float {:}DMPC_M_Kj_1'.format(prefix)
         Kj1_txt = self._export_np_array_to_c(Kj1, Kj1_txt, fill=fill) + '\n'
         
-        Hj_txt = nl + extern + 'float {:}Hj'.format(prefix)
+        Hj_txt = nl + extern + 'float {:}DMPC_M_Hj'.format(prefix)
         Hj_txt = self._export_np_array_to_c(Hj, Hj_txt, fill=fill) + '\n'
         
-        DU1_txt = nl + extern + 'float {:}DU_1'.format(prefix)
+        DU1_txt = nl + extern + 'float {:}DMPC_M_DU_1'.format(prefix)
         DU1_txt = self._export_np_array_to_c(DU1, DU1_txt, fill=fill) + '\n'
         
-        DU2_txt = nl + extern + 'float {:}DU_2'.format(prefix)
+        DU2_txt = nl + extern + 'float {:}DMPC_M_DU_2'.format(prefix)
         DU2_txt = self._export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
 
         txt = comments + \

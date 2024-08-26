@@ -24,20 +24,27 @@ r1 = [10, 0]
 r2 = [-5, -5]
 
 # Discretization
-fs = 5e3
+fs = 7.5e3
 dt = 1.0 / fs
 
+t_sim = 10e-3
+
 # Optimization parameters
-rw = [0.0005, 0.0005]
+rw = [2e-5, 2e-5]
 n_pred = 4
 n_ctl = 4
 n_cnt = 4
 
 # Constraints
+k = 0.875
 V_dc = 650
-V_max = V_dc / np.sqrt(3)
-u_lim = [[-V_max, -V_max], [V_max, V_max]]
-x_lim = [[None, None, -15, -15, None, None], [None, None, 15, 15, None, None]]
+u_lim = V_dc / np.sqrt(3)
+ud_lim = k * u_lim
+uq_lim = np.sqrt(1 - k ** 2) * u_lim
+u_lim = [[-ud_lim, -uq_lim], [ud_lim, uq_lim]]
+
+ii_lim = 15
+x_lim = [[None, None, -ii_lim, -ii_lim, None, None], [None, None, ii_lim, ii_lim, None, None]]
 
 # --- System ---
 Am = np.array([[0,      wg,     0,      0,      -1/Lg,  0],
@@ -62,7 +69,7 @@ Bu = Bd[:, :2]
 Bv = Bd[:, 2:]
 
 # Sim points
-n = 100
+n = int(t_sim / dt)
 
 # --- System ---
 sys = ctl.mpc.System(Ad, Bu, Cd, n_pred=n_pred, n_ctl=n_ctl, n_cnt=n_cnt, rw=rw, x_lim=x_lim, u_lim=u_lim)
@@ -77,35 +84,56 @@ r[int(n/2):, :] = r2
 data = sys.sim(xi, ui, r, n, Bd=Bv, ud=ug, solver='hild')
 
 # --- Plots ---
+ud_lim_l = -ud_lim * np.ones(n)
+ud_lim_u =  ud_lim * np.ones(n)
+
+uq_lim_l = -uq_lim * np.ones(n)
+uq_lim_u =  uq_lim * np.ones(n)
+
+ii_lim_l = -ii_lim * np.ones(n)
+ii_lim_u =  ii_lim * np.ones(n)
+
 t = dt * np.arange(n)
 
 plt.figure(figsize=(8,8))
 
+# Control signals
 ax = plt.subplot(4,1,1)
 plt.step(t / 1e-3, data['u'], where='post')
-plt.xlabel('Time (ms)')
+
+plt.plot(t / 1e-3, ud_lim_l, 'C0--')
+plt.plot(t / 1e-3, ud_lim_u, 'C0--')
+plt.plot(t / 1e-3, uq_lim_l, 'C1--')
+plt.plot(t / 1e-3, uq_lim_u, 'C1--')
+
 plt.ylabel('Voltage (V)')
 plt.title('Control signals', fontsize=11)
 plt.gca().tick_params(labelbottom=False)
 plt.grid()
 plt.xlim([t[0]/1e-3, t[-1]/1e-3])
 
+# Inverter-side currents
 plt.subplot(4,1,2, sharex=ax)
+
+plt.plot(t / 1e-3, ii_lim_l, 'k--')
+plt.plot(t / 1e-3, ii_lim_u, 'k--')
+
 plt.step(t / 1e-3, data['xm'][:,[2, 3]], where='post')
-plt.xlabel('Time (ms)')
+
 plt.ylabel('Current (A)')
 plt.title('Inverter-side current', fontsize=11)
 plt.gca().tick_params(labelbottom=False)
 plt.grid()
 
+# Filter cap. voltages
 plt.subplot(4,1,3, sharex=ax)
 plt.step(t / 1e-3, data['xm'][:,[4, 5]], where='post')
-plt.xlabel('Time (ms)')
 plt.ylabel('Voltage (V)')
 plt.title('Filter cap. voltage', fontsize=11)
 plt.gca().tick_params(labelbottom=False)
 plt.grid()
 
+# grid-side currents
 plt.subplot(4,1,4, sharex=ax)
 plt.step(t / 1e-3, data['y'], where='post')
 plt.xlabel('Time (ms)')
