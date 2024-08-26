@@ -3,6 +3,8 @@ import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
 
+plt.ion()
+
 # --- Model ---
 Li = 3.4e-3
 Lg = 1.8e-3
@@ -26,7 +28,7 @@ fs = 5e3
 dt = 1.0 / fs
 
 # Optimization parameters
-rw = [0.00025, 0.00025]
+rw = [0.0005, 0.0005]
 n_pred = 4
 n_ctl = 4
 n_cnt = 4
@@ -60,7 +62,7 @@ Bu = Bd[:, :2]
 Bv = Bd[:, 2:]
 
 # Sim points
-n = 50
+n = 100
 
 # --- System ---
 sys = ctl.mpc.System(Ad, Bu, Cd, n_pred=n_pred, n_ctl=n_ctl, n_cnt=n_cnt, rw=rw, x_lim=x_lim, u_lim=u_lim)
@@ -72,7 +74,7 @@ r = np.zeros((n, 2))
 r[:int(n/2), :] = r1
 r[int(n/2):, :] = r2
 
-data = sys.sim(xi, ui, r, n, Bd=Bv, ud=ug)
+data = sys.sim(xi, ui, r, n, Bd=Bv, ud=ug, solver='hild')
 
 # --- Plots ---
 t = dt * np.arange(n)
@@ -112,5 +114,3 @@ plt.title('Grid-side current', fontsize=11)
 plt.grid()
 
 plt.tight_layout()
-
-plt.show()
