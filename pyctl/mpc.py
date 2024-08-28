@@ -3,6 +3,8 @@ import pyctl as ctl
 import qpsolvers as qps
 import sys
 
+import matplotlib.pyplot as plt
+
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
 
@@ -237,6 +239,76 @@ def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
     return (Ky[:m], K_mpc[:m, :])
 
 
+def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq):
+    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
+    closed-loop system.
+
+    Parameters
+    ----------
+    A : :class:`np.array`
+        :math:`A` matrix. An (n, n) numpy matrix.
+
+    B : :class:`np.array`
+        :math:`B` matrix. An (n + q, m) numpy matrix.
+
+    C : :class:`np.array`
+        :math:`C_m` matrix. A (q, n) numpy matrix.
+
+    n_pred : :class:`int`
+        Length of prediction horizon.
+
+    n_ctl : :class:`NoneType`, :class:`int`
+        Length of the prediction horizon where the control input increments
+        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
+        `n_ctl` less than `n_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
+        assumed.
+
+    n_ctn : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints are enforced.
+        Note that `n_ctn` is less than or equal to `n_ctl`. If set to `None`,
+        `n_ctn = n_ctl` is assumed.
+    
+    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weighting factor for the control inputs.If set to `None`, `rw` is set
+        to zero.
+
+    Returns
+    -------
+    (Ky, K_mpc) : :class:`tuple`
+        A tuple, containing two elements. The first element is the vector
+        `Ky` and the second element is the vector `K_mpc`.
+
+    """    
+    # Number of states
+    n = A.shape[0]
+
+    # Number of inputs
+    if B.ndim == 1:
+        m = 1
+    else:
+        m = B.shape[1]
+
+    # Number of outputs
+    if C.ndim == 1:
+        q = 1
+    else:
+        q = C.shape[0]
+
+    Rs_bar = reference_matrix(q, n_pred)
+
+    R = control_weighting_matrix(rw, n_ctl)
+
+    F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
+    Phi_t = Phi.T
+    
+    K = np.linalg.inv(Phi_t @ Phi + R + Qq) @ Phi_t
+    K_mpc = K @ F
+    Ky = K @ Rs_bar
+
+    return (Ky[:m], K_mpc[:m, :])
+
+
 class System:
     """A class to create a discrete-time system for model predictive control
     simulations.
@@ -283,7 +355,10 @@ class System:
         constraints and set on the input signals.
 
     """
-    def __init__(self, Am, Bm, Cm, n_pred, n_ctl=None, n_cnt=None, rw=None, q=None, x_lim=None, u_lim=None):
+    def __init__(self, Am, Bm, Cm, n_pred,
+                 n_ctl=None, n_cnt=None,
+                 rw=None, q=None, lp=None,
+                 x_lim=None, u_lim=None):
 
         # System model and augmented model
         self.Am = Am; self.Bm = Bm; self.Cm = Cm
@@ -320,12 +395,15 @@ class System:
         self.rw = rw
 
         # Spectrum weighting factor
-        if type(q) is None:
-            q = 0.0
+        if q is None:
+            q = np.zeros(2 * self.n_ctl)
+            lp = self.n_ctl
         
-        if type(q) is int or type(q) is float:
-            r_w = np.array([q])
-
+        self.q = q
+        self.lp = lp
+        self._du_1 = None
+        self.temp_aux = 0
+        
         # Bounds
         if type(x_lim) is list:
             x_lim = np.array(x_lim)
@@ -335,15 +413,6 @@ class System:
         self.x_lim = x_lim
         self.u_lim = u_lim
 
-        # Gains for unconstrained problem
-        n_xm = Am.shape[0]
-        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-                                  self.n_pred, self.n_ctl, self.rw)
-        Kx = K_mpc[:, :n_xm]
-
-        self.Ky = Ky
-        self.Kx = Kx
-
         if (x_lim is not None) or (u_lim is not None):
             # Initializes static qp matrices
             self.gen_static_qp_matrices()
@@ -351,9 +420,51 @@ class System:
             # Creates Hildreth's static matrix        
             self.Hj = self.M @ self.Ej_inv @ self.M.T
 
+        self.gen_freq_pen_matrices()
+
+        # Gains for unconstrained problem
+        n_xm = Am.shape[0]
+
+        Ky, K_mpc = opt_unc_gains_freq(self.A, self.B, self.C,\
+                                       self.n_pred, self.n_ctl, self.rw, self.Qq)
+        Kx = K_mpc[:, :n_xm]
+
+        self.Ky = Ky
+        self.Kx = Kx
+
+        print('Ky: {:}'.format(Ky))
+        print('Kx: {:}'.format(Kx))        
+        
         self.c_gen = c_gen()
 
-    
+
+    def gen_freq_pen_matrices(self):
+
+        lp = self.lp
+        lf = self.n_ctl
+        q = self.q
+
+        N = lp + lf
+
+        W = np.zeros((N, N), dtype=complex)
+
+        for ni in range(N):
+            W[ni, :] = np.exp(-2 * np.pi * 1j * ni * np.arange(N) / N)
+
+        
+        Q = np.diag(q)
+        Qw = (W.conj().T @ Q @ W).real
+
+        Qw4 = Qw[lp:, lp:]
+        Qw3 = Qw[lp:, :lp]
+
+        Qq = Qw4
+        Ql = Qw3
+        
+        self.Qq = Qq
+        self.Ql = Ql
+
+        
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
 
@@ -442,7 +553,30 @@ class System:
         F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
         self.F = F; self.Phi = Phi
 
-        Ej = Phi.T @ Phi + R_bar
+        lp = self.lp
+        lf = self.n_ctl
+        q = self.q
+
+        N = lp + lf
+
+        W = np.zeros((N, N), dtype=complex)
+
+        for ni in range(N):
+            W[ni, :] = np.exp(-2 * np.pi * 1j * ni * np.arange(N) / N)
+
+        Q = np.diag(q)
+        Qw = (W.conj().T @ Q @ W).real
+
+        Qw4 = Qw[lp:, lp:]
+        Qw3 = Qw[lp:, :lp]
+
+        Qq = Qw4
+        Ql = Qw3
+        
+        self.Qq = Qq
+        self.Ql = Ql
+        
+        Ej = Phi.T @ Phi + R_bar + Qq
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
@@ -456,7 +590,7 @@ class System:
         self.y_idx = np.array(y_idx)
 
 
-    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
+    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r, du_1):
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
@@ -467,7 +601,7 @@ class System:
         u_lim = self.u_lim
         x_lim = self.x_lim
 
-        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1)) + self.Ql @ du_1
 
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
@@ -499,10 +633,33 @@ class System:
     def opt(self, xm, dx, xa, ui, r, solver='hild'):
 
         nu = ui.shape[0]
+
+        if self._du_1 is None:
+            self._du_1 = np.zeros((self.lp, 1))
         
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r, self._du_1)
 
         du, n_iters = self.qp(Fj, y, solver=solver)
+
+        #if (self.temp_aux % 100) == 1:
+        if self.temp_aux < 5:
+            plt.subplot(2,1,1)
+            #u_hor = self.Ml @ du.reshape(-1, 1) + self.U_ * u_i[0]
+            #u_hor = u_hor.reshape(-1)
+            #print(du)
+            #print(self._du_1)
+            duu = np.hstack((self._du_1.reshape(-1), du))
+            plt.plot(duu)
+
+            plt.subplot(2,1,2)
+            plt.plot(np.abs(np.fft.fft(duu))[0:], '-x')
+            #print(len(np.abs(np.fft.fft(duu))[0:]))
+        self.temp_aux = self.temp_aux + 1
+
+        self._du_1[:self.lp - 1, 0] = self._du_1[1:self.lp, 0]
+        #print(du[0])
+        self._du_1[self.lp - 1, 0] = du[0]
+
 
         return (du[:nu], n_iters)
 
@@ -562,6 +719,7 @@ class System:
         else:
             Fj1 = -self.Phi.T
         Fj2 = self.Phi.T @ self.F
+        Fj3 = (self.Ej_inv @ self.Ql)[0, :].reshape(-1)
 
         Kj1 = self.M @ self.Ej_inv
 
@@ -579,7 +737,7 @@ class System:
         DU1 = (-self.Ej_inv)[:m, :]
         DU2 = (-self.Ej_inv @ self.M.T)[:m, :]
 
-        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
+        return (Fj1, Fj2, Fj3, Fx, Kj1, Hj, DU1, DU2)
     
 
     def sim(self, xi, ui, r, n, Bd=None, ud=None, solver='hild'):
@@ -718,7 +876,7 @@ class System:
     def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
 
         # Matrices for Hildreth's QP procedure
-        (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
+        (Fj1, Fj2, Fj3, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
         
         header = self.c_gen.header(ftype=ftype, prefix=prefix)
 
@@ -733,7 +891,7 @@ class System:
 
         qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype, prefix=prefix)
 
-        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
+        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fj3, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
         
         txt = header + includes + in_cnt + st_cnt +\
               out_idx + pred_matrices + qp_matrices + hild_matrices +\
@@ -789,7 +947,6 @@ class System:
     def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
         
         if prefix is None:
-            prefix = ''
             file_prefix = ''
         else:
             file_prefix = prefix.lower() + '_'
@@ -1052,7 +1209,7 @@ class c_gen:
         return txt
     
 
-    def hild_matrices(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
+    def hild_matrices(self, Fj1, Fj2, Fj3, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
         
         if prefix is None:
             prefix = ''
@@ -1074,6 +1231,9 @@ class c_gen:
         
         Fj2_txt = nl + extern + 'float {:}DMPC_M_Fj_2'.format(prefix)
         Fj2_txt = self._export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
+
+        Fj3_txt = nl + extern + 'float {:}DMPC_M_Fj_3'.format(prefix)
+        Fj3_txt = self._export_np_array_to_c(Fj3, Fj3_txt, fill=fill) + '\n'
         
         Fx_txt = nl + extern + 'float {:}DMPC_M_Fx'.format(prefix)
         Fx_txt = self._export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
@@ -1091,7 +1251,7 @@ class c_gen:
         DU2_txt = self._export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
 
         txt = comments + \
-              Fj1_txt + Fj2_txt + Fx_txt +\
+              Fj1_txt + Fj2_txt + Fj3_txt + Fx_txt +\
               Kj1_txt + Hj_txt + DU1_txt + DU2_txt
         
         return txt
