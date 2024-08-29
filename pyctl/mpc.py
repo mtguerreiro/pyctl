@@ -719,7 +719,8 @@ class System:
         else:
             Fj1 = -self.Phi.T
         Fj2 = self.Phi.T @ self.F
-        Fj3 = (self.Ej_inv @ self.Ql)[0, :].reshape(-1)
+        #Fj3 = (self.Ej_inv @ self.Ql)[0, :].reshape(-1)
+        Fj3 = self.Ql
 
         Kj1 = self.M @ self.Ej_inv
 
