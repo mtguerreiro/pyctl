@@ -789,7 +789,6 @@ class System:
     def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
         
         if prefix is None:
-            prefix = ''
             file_prefix = ''
         else:
             file_prefix = prefix.lower() + '_'
