@@ -550,7 +550,7 @@ class System:
         return (du_opt, n_iters)
 
 
-    def hild_matrices(self, ref='constant'):
+    def hild_matrices(self, ref='constant', normalize=False):
 
         if self.Bm.ndim == 1:
             m = 1
@@ -569,10 +569,17 @@ class System:
             Fx = np.zeros((1,1))
         else:
             Fx = self.Mx_aux @ self.Fx
-
-        Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
-        Hj[:] = self.Hj[:]
-        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+            
+        if normalize == True:
+            Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
+            Hj[:] = self.Hj[:]
+            Hj_aux = Hj.copy()
+            np.fill_diagonal(Hj_aux, 1)
+            Hj = np.linalg.inv(-np.diag(np.diag(Hj))) @ Hj_aux
+        else:
+            Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
+            Hj[:] = self.Hj[:]
+            Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
 
         #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
         
