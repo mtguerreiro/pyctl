@@ -601,8 +601,10 @@ class System:
         u_lim = self.u_lim
         x_lim = self.x_lim
 
-        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1)) + self.Ql @ du_1
-
+        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+        if self.lp > 0:
+            Fj = Fj + self.Ql @ du_1
+            
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
         y = None
@@ -648,7 +650,10 @@ class System:
             #u_hor = u_hor.reshape(-1)
             #print(du)
             #print(self._du_1)
-            duu = np.hstack((self._du_1.reshape(-1), du))
+            if self.lp > 0:
+                duu = np.hstack((self._du_1.reshape(-1), du))
+            else:
+                duu = du
             plt.plot(duu)
 
             plt.subplot(2,1,2)
@@ -656,9 +661,9 @@ class System:
             #print(len(np.abs(np.fft.fft(duu))[0:]))
         self.temp_aux = self.temp_aux + 1
 
-        self._du_1[:self.lp - 1, 0] = self._du_1[1:self.lp, 0]
-        #print(du[0])
-        self._du_1[self.lp - 1, 0] = du[0]
+        if self.lp > 0:
+            self._du_1[:self.lp - 1, 0] = self._du_1[1:self.lp, 0]
+            self._du_1[self.lp - 1, 0] = du[0]
 
 
         return (du[:nu], n_iters)
