@@ -643,28 +643,20 @@ class System:
 
         du, n_iters = self.qp(Fj, y, solver=solver)
 
-        #if (self.temp_aux % 100) == 1:
-        if self.temp_aux < 5:
-            plt.subplot(2,1,1)
-            #u_hor = self.Ml @ du.reshape(-1, 1) + self.U_ * u_i[0]
-            #u_hor = u_hor.reshape(-1)
-            #print(du)
-            #print(self._du_1)
+        if self.temp_aux == 0:
+
             if self.lp > 0:
                 duu = np.hstack((self._du_1.reshape(-1), du))
             else:
                 duu = du
-            plt.plot(duu)
 
-            plt.subplot(2,1,2)
-            plt.plot(np.abs(np.fft.fft(duu))[0:], '-x')
-            #print(len(np.abs(np.fft.fft(duu))[0:]))
+            self._du_0 = duu
+
         self.temp_aux = self.temp_aux + 1
 
         if self.lp > 0:
             self._du_1[:self.lp - 1, 0] = self._du_1[1:self.lp, 0]
             self._du_1[self.lp - 1, 0] = du[0]
-
 
         return (du[:nu], n_iters)
 
@@ -940,10 +932,13 @@ class System:
         n_st_cnt = 0
         if self.x_lim_idx is not None:
             n_st_cnt = self.x_lim_idx.shape[0]
+
+        lp = self.lp
         
         defs = self.c_gen.defs_header(n_xm, n_xa, ny, nu, nd,
                                n_pred, n_ctl, n_cnt, n_lambda,
                                n_in_cnt, n_st_cnt,
+                               lp = lp,
                                scaling=scaling,
                                prefix=prefix)
 
@@ -1263,7 +1258,7 @@ class c_gen:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_ctn, scaling=1.0, prefix=None):
+    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_ctn, lp, scaling=1.0, prefix=None):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -1337,10 +1332,14 @@ class c_gen:
         n_st_cnt_txt = '\n/* Input constraints */\n'+\
                           '#define {:}\n'.format(n_st_cnt_def)
 
+        lp_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_LP', lp)
+        lp_txt = '\n/* Past samples for freq. penalization */\n'+\
+                          '#define {:}\n'.format(lp_def)
+
         defs_txt = header + def_guard_txt +\
                    scale_txt +\
                    n_states_txt + n_hor_txt + n_in_out_txt +\
-                   n_size_u_txt + n_input_cnt_txt + n_st_cnt_txt +\
+                   n_size_u_txt + n_input_cnt_txt + n_st_cnt_txt + lp_txt+\
                    guard_end_txt
         
         return defs_txt
