@@ -344,6 +344,12 @@ class System:
         self.Ky = Ky
         self.Kx = Kx
 
+        if x_lim is None:
+            self.x_lim_idx = None
+
+        if u_lim is None:
+            self.u_lim_idx = None
+
         if (x_lim is not None) or (u_lim is not None):
             # Initializes static qp matrices
             self.gen_static_qp_matrices()
@@ -724,9 +730,18 @@ class System:
 
         includes, end = self.c_gen.includes(ftype=ftype, prefix=prefix)
 
-        in_cnt = self.c_gen.cnt(self.u_lim / scaling, self.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
-        st_cnt = self.c_gen.cnt(self.x_lim / scaling, self.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
+        u_lim = self.u_lim
+        if u_lim is not None:
+            u_lim = u_lim / scaling
+        in_cnt = self.c_gen.cnt(u_lim, self.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
 
+        x_lim = self.x_lim
+        if x_lim is not None:
+            x_lim = x_lim / scaling
+
+        st_cnt = self.c_gen.cnt(x_lim, self.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
+        print(st_cnt)
+        
         out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype, prefix=prefix)
 
         pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
@@ -1096,7 +1111,7 @@ class c_gen:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_ctn, scaling=1.0, prefix=None):
+    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_cnt, scaling=1.0, prefix=None):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -1166,8 +1181,8 @@ class c_gen:
         n_input_cnt_txt = '\n/* Input constraints */\n'+\
                           '#define {:}\n'.format(n_input_cnt_def)
 
-        n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CTR', nu_cnt)
-        n_st_cnt_txt = '\n/* Input constraints */\n'+\
+        n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CTR', n_st_cnt)
+        n_st_cnt_txt = '\n/* State constraints */\n'+\
                           '#define {:}\n'.format(n_st_cnt_def)
 
         defs_txt = header + def_guard_txt +\
