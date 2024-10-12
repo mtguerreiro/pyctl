@@ -4,6 +4,8 @@ import scipy.signal
 import matplotlib
 import matplotlib.pyplot as plt
 
+plt.ion()
+
 # --- Model ---
 Am = np.array([[0.0, 1.0],
                [0.0, 0.0]])
@@ -56,4 +58,4 @@ plt.legend()
 plt.xlim([0, n - 1])
 plt.grid()
 
-plt.show()
+#plt.show()

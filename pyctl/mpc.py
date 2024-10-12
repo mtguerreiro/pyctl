@@ -357,6 +357,15 @@ class System:
             # Creates Hildreth's static matrix        
             self.Hj = self.M @ self.Ej_inv @ self.M.T
 
+        # Creates index vector of outputs
+        y_idx = []
+        if Cm.ndim != 1:
+            Cm = np.sum(Cm, axis=0)
+        for i, yi in enumerate(Cm):
+            if np.abs(yi) > 0.5: y_idx.append(i)
+
+        self.y_idx = np.array(y_idx)
+        
         self.c_gen = c_gen()
 
     
@@ -452,15 +461,6 @@ class System:
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
-        # Creates index vector of outputs
-        y_idx = []
-        if Cm.ndim != 1:
-            Cm = np.sum(Cm, axis=0)
-        for i, yi in enumerate(Cm):
-            if np.abs(yi) > 0.5: y_idx.append(i)
-
-        self.y_idx = np.array(y_idx)
-
 
     def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
         """Sets dynamic matrices, to be used later by the optimization.
@@ -514,7 +514,7 @@ class System:
 
     
     def qp(self, Fj, y, solver='hild'):
-        """Solver the QP problem given by:
+        r"""Solves the QP problem given by:
 
         .. :math:
 
@@ -723,48 +723,63 @@ class System:
 
     def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
 
+        u_lim = self.u_lim
+        x_lim = self.x_lim
+        
         # Matrices for Hildreth's QP procedure
-        (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
+        if (u_lim is not None) or (x_lim is not None):
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
         
         header = self.c_gen.header(ftype=ftype, prefix=prefix)
 
         includes, end = self.c_gen.includes(ftype=ftype, prefix=prefix)
 
-        u_lim = self.u_lim
         if u_lim is not None:
             u_lim = u_lim / scaling
         in_cnt = self.c_gen.cnt(u_lim, self.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
 
-        x_lim = self.x_lim
         if x_lim is not None:
             x_lim = x_lim / scaling
 
         st_cnt = self.c_gen.cnt(x_lim, self.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
-        print(st_cnt)
         
         out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype, prefix=prefix)
 
         pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
 
-        qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype, prefix=prefix)
-
-        hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
+        kx_ky_gains = self.c_gen.Kx_Ky_gains(self.Kx, self.Ky, ftype=ftype, prefix=prefix)
+        
+        if (u_lim is not None) or (x_lim is not None):
+            qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype, prefix=prefix)
+            hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
+        else:
+            qp_matrices = ''
+            hild_matrices = ''
         
         txt = header + includes + in_cnt + st_cnt +\
-              out_idx + pred_matrices + qp_matrices + hild_matrices +\
+              out_idx + pred_matrices + kx_ky_gains +\
+              qp_matrices + hild_matrices +\
               end
 
         return txt
     
 
     def _gen_defs(self, scaling=1.0, Bd=None, prefix=None):
+
+        x_lim = self.x_lim
+        u_lim = self.u_lim
         
         n_xm = self.Am.shape[0]
         n_xa = self.A.shape[0]
         n_pred = self.n_pred
         n_ctl = self.n_ctl
-        n_cnt = self.n_cnt
-        n_lambda = self.M.shape[0]
+
+        if (x_lim is not None) or (u_lim is not None):
+            n_cnt = self.n_cnt
+            n_lambda = self.M.shape[0]
+        else:
+            n_cnt = 0
+            n_lambda = 0
 
         if self.Cm.ndim == 1:
             ny = 1
@@ -1010,6 +1025,34 @@ class c_gen:
         
         return txt
 
+
+    def Kx_Ky_gains(self, Kx, Ky, ftype='src', prefix=None):
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        nl = '\n'
+        extern = ''
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+            nl = ''
+        
+        comment = '/* Optimal Kx and Ky for unconstrained problems */\n'
+
+        Kx_txt = extern + 'float {:}DMPC_Kx'.format(prefix)
+        Ky_txt = extern + 'float {:}DMPC_Ky'.format(prefix)
+
+        Kx_txt = self._export_np_array_to_c(Kx, Kx_txt, fill=fill) + '\n'
+        Ky_txt = self._export_np_array_to_c(Ky, Ky_txt, fill=fill) + '\n'
+
+        txt = '\n' + comment + Kx_txt + nl + Ky_txt
+        
+        return txt
+    
 
     def qp_matrices(self, Ej, M, ftype='src', prefix=None):
 
