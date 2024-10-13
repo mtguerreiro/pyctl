@@ -3,6 +3,8 @@ import pyctl as ctl
 import qpsolvers as qps
 import sys
 
+import ctypes
+
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
 
@@ -368,6 +370,8 @@ class System:
         
         self.c_gen = c_gen()
 
+        self._qp_c = None
+
     
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
@@ -505,14 +509,44 @@ class System:
     def opt(self, xm, dx, xa, ui, r, solver='hild'):
 
         nu = ui.shape[0]
-        
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
 
-        du, n_iters = self.qp(Fj, y, solver=solver)
+        if solver == 'hild_c':
+            du, n_iters = self.qp_c(xm, dx, xa, ui, r)
+        else:
+            Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+            du, n_iters = self.qp(Fj, y, solver=solver)
 
         return (du[:nu], n_iters)
 
-    
+
+    def qp_c(self, xm, dx, xa, ui, r):
+
+        xm_1 = xm - dx
+
+        xm = xm.astype(np.float32)
+        xm_1 = xm_1.astype(np.float32)
+        dx = dx.astype(np.float32)
+        ui = ui.astype(np.float32)
+        r = r.astype(np.float32)        
+
+        c_float_p = ctypes.POINTER(ctypes.c_float)
+        
+        if self._qp_c is None:
+            self._qp_c = ctypes.CDLL('../cdmpc_tst/libcdmpc_py.so')
+            self._qp_c.cdmpc_py_step.argtypes = (
+                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
+                )
+
+        du = np.zeros(ui.shape, dtype=np.float32)
+
+        n_iters = self._qp_c.cdmpc_py_step(
+            xm.ctypes.data_as(c_float_p), xm_1.ctypes.data_as(c_float_p),
+            r.ctypes.data_as(c_float_p), ui.ctypes.data_as(c_float_p),
+            du.ctypes.data_as(c_float_p))
+        
+        return du, n_iters
+
+        
     def qp(self, Fj, y, solver='hild'):
         r"""Solves the QP problem given by:
 
