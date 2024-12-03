@@ -396,8 +396,8 @@ class System:
 
         # Spectrum weighting factor
         if q is None:
-            q = np.zeros(2 * self.n_ctl)
-            lp = self.n_ctl
+            q = np.zeros(2 * self.n_ctl * nu)
+            lp = self.n_ctl * nu
         
         self.q = q
         self.lp = lp
@@ -453,8 +453,13 @@ class System:
 
     def gen_freq_pen_matrices(self):
 
+        if self.Bm.ndim == 1:
+            nu = 1
+        else:
+            nu = self.Bm.shape[1]
+        
         lp = self.lp
-        lf = self.n_ctl
+        lf = self.n_ctl * nu
         q = self.q
 
         N = lp + lf
@@ -464,7 +469,6 @@ class System:
         for ni in range(N):
             W[ni, :] = np.exp(-2 * np.pi * 1j * ni * np.arange(N) / N)
 
-        
         Q = np.diag(q)
         Qw = (W.conj().T @ Q @ W).real
 
@@ -567,7 +571,7 @@ class System:
         self.F = F; self.Phi = Phi
 
         lp = self.lp
-        lf = self.n_ctl
+        lf = self.n_ctl * m
         q = self.q
 
         N = lp + lf
