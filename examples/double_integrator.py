@@ -4,6 +4,8 @@ import scipy.signal
 import matplotlib
 import matplotlib.pyplot as plt
 
+plt.ion()
+
 # --- Model ---
 Am = np.array([[0.0, 1.0],
                [0.0, 0.0]])
@@ -16,7 +18,7 @@ Cm = np.array([1.0, 0.0])
 xi = [-2.0, 0.0]
 ui = [0.0]
 
-u_lim = [-10, 10] # or None
+u_lim = [[-10], [10]] # or None
 x_lim = [[None, -4], [None, 4]] # or None
 
 # Discretization
@@ -56,4 +58,4 @@ plt.legend()
 plt.xlim([0, n - 1])
 plt.grid()
 
-plt.show()
+#plt.show()
