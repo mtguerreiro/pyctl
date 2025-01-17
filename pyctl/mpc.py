@@ -479,7 +479,7 @@ class System:
             W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(N) / N)
 
         Q = np.diag(q)
-        Qw = (W.conj() @ Q @ W).real
+        Qw = (W.conj() @ Q @ W).real / N**2
 
         self.Ql = Qw[lp:, :lp]
         self.Qq = Qw[lp:, lp:]
@@ -816,6 +816,8 @@ class System:
         Ky = self.Ky
         Kx = self.Kx
 
+        _du_1 = np.zeros((n, nu))
+
         if Bd is None:
             Bd = np.zeros(Bm.shape)
             ud = np.zeros(u.shape)
@@ -835,17 +837,8 @@ class System:
             if (self.u_lim is None) and (self.x_lim is None):
                 du = - Ky @ (y[i] - r[i]) - Kx @ dx
                 if self.lp > 0:
-                    if self._du_1 is None:
-                        self._du_1 = np.zeros(self.lp)
-                    #u_past = np.roll(u, self.lp - i)
-                    #du_past = 
-                    du_past = np.roll( np.diff(u, axis=0), self.lp - i )[:self.lp, :][::-1]
-                    du = du + self.Kq @ self._du_1
-                    self._du_1[:self.lp - 1] = self._du_1[1:self.lp]
-                    self._du_1[self.lp - 1] = du[0]
-            
-                    #self._du_1[:self.lp-1] = self._du_1[self.lp - 1:]
-                    #self._du_1[self.lp-1] = du
+                    du_past = np.roll(_du_1, self.lp - i )[:self.lp, :]
+                    du = du + self.Kq @ du_past
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
@@ -853,6 +846,7 @@ class System:
                 n_iters[i] = n_it
             
             u[i] = u[i] + du
+            _du_1[i] = du
             
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
