@@ -239,7 +239,7 @@ def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
     return (Ky[:m], K_mpc[:m, :])
 
 
-def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq):
+def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq, Ql):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -306,7 +306,13 @@ def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq):
     K_mpc = K @ F
     Ky = K @ Rs_bar
 
-    return (Ky[:m], K_mpc[:m, :])
+    if Ql is not None:
+        Kq = -np.linalg.inv(Phi_t @ Phi + R + Qq) @ Ql
+        Kq = Kq[:m, :]
+    else:
+        Kq = None
+    
+    return (Ky[:m], K_mpc[:m, :], Kq)
 
 
 class System:
@@ -393,12 +399,7 @@ class System:
             rw = rw * np.ones(nu)
 
         self.rw = rw
-
-        # Spectrum weighting factor
-        if q is None:
-            q = np.zeros(2 * self.n_ctl * nu)
-            lp = self.n_ctl * nu
-        
+       
         self.q = q
         self.lp = lp
         self._du_1 = None
@@ -417,14 +418,16 @@ class System:
 
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
-        Ky, K_mpc = opt_unc_gains_freq(self.A, self.B, self.C, \
-                                  self.n_pred, self.n_ctl, self.rw, self.Qq)
+        Ky, K_mpc, Kq = opt_unc_gains_freq(self.A, self.B, self.C,
+                                  self.n_pred, self.n_ctl, self.rw,
+                                  self.Qq, self.Ql)
         #Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
         #                          self.n_pred, self.n_ctl, self.rw)
         Kx = K_mpc[:, :n_xm]
 
         self.Ky = Ky
         self.Kx = Kx
+        self.Kq = Kq
 
         if x_lim is None:
             self.x_lim_idx = None
@@ -457,8 +460,14 @@ class System:
             nu = 1
         else:
             nu = self.Bm.shape[1]
-        
-        lp = self.lp
+
+        if self.q is None:
+            self.Qq = np.zeros((self.n_ctl * nu, self.n_ctl * nu))
+            self.Ql = None
+            self.lp = 0
+            return
+
+        lp = self.lp * nu
         lf = self.n_ctl * nu
         q = self.q
 
@@ -467,19 +476,13 @@ class System:
         W = np.zeros((N, N), dtype=complex)
 
         for ni in range(N):
-            W[ni, :] = np.exp(-2 * np.pi * 1j * ni * np.arange(N) / N)
+            W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(N) / N)
 
         Q = np.diag(q)
-        Qw = (W.conj().T @ Q @ W).real
+        Qw = (W.conj() @ Q @ W).real
 
-        Qw4 = Qw[lp:, lp:]
-        Qw3 = Qw[lp:, :lp]
-
-        Qq = Qw4
-        Ql = Qw3
-        
-        self.Qq = Qq
-        self.Ql = Ql
+        self.Ql = Qw[lp:, :lp]
+        self.Qq = Qw[lp:, lp:]
 
         
     def gen_static_qp_matrices(self):
@@ -490,6 +493,7 @@ class System:
         Am = self.Am; Bm = self.Bm; Cm = self.Cm
         n_pred = self.n_pred; n_ctl = self.n_ctl; n_cnt = self.n_cnt
         rw = self.rw
+        Qq = self.Qq
 
         x_lim = self.x_lim
         u_lim = self.u_lim
@@ -569,29 +573,6 @@ class System:
         # QP matrices
         F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
         self.F = F; self.Phi = Phi
-
-        lp = self.lp
-        lf = self.n_ctl * m
-        q = self.q
-
-        N = lp + lf
-
-        W = np.zeros((N, N), dtype=complex)
-
-        for ni in range(N):
-            W[ni, :] = np.exp(-2 * np.pi * 1j * ni * np.arange(N) / N)
-
-        Q = np.diag(q)
-        Qw = (W.conj().T @ Q @ W).real
-
-        Qw4 = Qw[lp:, lp:]
-        Qw3 = Qw[lp:, :lp]
-
-        Qq = Qw4
-        Ql = Qw3
-        
-        self.Qq = Qq
-        self.Ql = Ql
         
         Ej = Phi.T @ Phi + R_bar + Qq
         Ej_inv = np.linalg.inv(Ej)
@@ -652,12 +633,10 @@ class System:
         du, n_iters = self.qp(Fj, y, solver=solver)
 
         if self.temp_aux == 0:
-
             if self.lp > 0:
                 duu = np.hstack((self._du_1.reshape(-1), du))
             else:
                 duu = du
-
             self._du_0 = duu
 
         self.temp_aux = self.temp_aux + 1
@@ -724,7 +703,7 @@ class System:
         else:
             Fj1 = -self.Phi.T
         Fj2 = self.Phi.T @ self.F
-        #Fj3 = (self.Ej_inv @ self.Ql)[0, :].reshape(-1)
+
         Fj3 = self.Ql
 
         Kj1 = self.M @ self.Ej_inv
@@ -828,7 +807,8 @@ class System:
         xa = np.zeros((A.shape[0], 1))
 
         u = np.zeros((n, nu))
-
+        n_iters = np.zeros(n)
+        
         xm[0] = xi
         dx = xm[0]
         u[0] = ui
@@ -853,14 +833,27 @@ class System:
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx
+                du = - Ky @ (y[i] - r[i]) - Kx @ dx
+                if self.lp > 0:
+                    if self._du_1 is None:
+                        self._du_1 = np.zeros(self.lp)
+                    #u_past = np.roll(u, self.lp - i)
+                    #du_past = 
+                    du_past = np.roll( np.diff(u, axis=0), self.lp - i )[:self.lp, :][::-1]
+                    du = du + self.Kq @ self._du_1
+                    self._du_1[:self.lp - 1] = self._du_1[1:self.lp]
+                    self._du_1[self.lp - 1] = du[0]
+            
+                    #self._du_1[:self.lp-1] = self._du_1[self.lp - 1:]
+                    #self._du_1[self.lp-1] = du
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, _ = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver) 
+                du, n_it = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver) 
+                n_iters[i] = n_it
             
             u[i] = u[i] + du
-
+            
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
 
@@ -871,10 +864,13 @@ class System:
         # Updates last value of y
         y[n - 1] = Cm @ xm[n - 1]
 
+        n_iters[n - 1] = n_iters[n - 2]
+
         results = {}
         results['u'] = u
         results['xm'] = xm
         results['y'] = y
+        results['n_iters'] = n_iters
 
         return results
 
@@ -1293,8 +1289,11 @@ class c_gen:
         Fj2_txt = nl + extern + 'float {:}DMPC_M_Fj_2'.format(prefix)
         Fj2_txt = self._export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
 
-        Fj3_txt = nl + extern + 'float {:}DMPC_M_Fj_3'.format(prefix)
-        Fj3_txt = self._export_np_array_to_c(Fj3, Fj3_txt, fill=fill) + '\n'
+        if Fj3 is not None:
+            Fj3_txt = nl + extern + 'float {:}DMPC_M_Fj_3'.format(prefix)
+            Fj3_txt = self._export_np_array_to_c(Fj3, Fj3_txt, fill=fill) + '\n'
+        else:
+            Fj3_txt = ''
         
         Fx_txt = nl + extern + 'float {:}DMPC_M_Fx'.format(prefix)
         Fx_txt = self._export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
