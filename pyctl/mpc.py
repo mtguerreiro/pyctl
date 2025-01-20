@@ -865,6 +865,7 @@ class System:
         results['xm'] = xm
         results['y'] = y
         results['n_iters'] = n_iters
+        results['du'] = _du_1 
 
         return results
 
