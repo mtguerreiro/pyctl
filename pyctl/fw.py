@@ -97,9 +97,31 @@ class FreqWeighting:
             self.du_1 = np.zeros((lp * nu, 1))
             self.gen_static_matrices()
 
+        self.Kq = None
 
+
+    def set_Kq(self, Kq):
+
+        self.Kq = Kq
+
+
+    def du_unc(self, du_1):
+        
+        self.update_du_past(du_1)
+        
+        if self.Kq is not None:
+            du = self.Kq @ self.du_1
+        else:
+            du = 0
+
+        return du
+
+    
     def update_du_past(self, du_1):
 
+        if self.lp == 0:
+            return
+        
         lp = self.lp
         nu = self.nu
         
@@ -109,7 +131,12 @@ class FreqWeighting:
 
     def du_past_vector(self):
 
-        return self.du_1
+        if self.lp == 0:
+            past_vector = 0
+        else:
+            past_vector = self.du_1
+            
+        return past_vector
 
 
     def quad_cost_static(self):

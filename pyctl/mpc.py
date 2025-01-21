@@ -239,82 +239,6 @@ def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
     return (Ky[:m], K_mpc[:m, :])
 
 
-def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq, Ql):
-    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
-    closed-loop system.
-
-    Parameters
-    ----------
-    A : :class:`np.array`
-        :math:`A` matrix. An (n, n) numpy matrix.
-
-    B : :class:`np.array`
-        :math:`B` matrix. An (n + q, m) numpy matrix.
-
-    C : :class:`np.array`
-        :math:`C_m` matrix. A (q, n) numpy matrix.
-
-    n_pred : :class:`int`
-        Length of prediction horizon.
-
-    n_ctl : :class:`NoneType`, :class:`int`
-        Length of the prediction horizon where the control input increments
-        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
-        `n_ctl` less than `n_pred`, the increments are set zero to for the
-        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
-        assumed.
-
-    n_ctn : :class:`NoneType`, :class:`int`
-        Lenght of the prediction horizon where the constraints are enforced.
-        Note that `n_ctn` is less than or equal to `n_ctl`. If set to `None`,
-        `n_ctn = n_ctl` is assumed.
-    
-    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
-        Weighting factor for the control inputs.If set to `None`, `rw` is set
-        to zero.
-
-    Returns
-    -------
-    (Ky, K_mpc) : :class:`tuple`
-        A tuple, containing two elements. The first element is the vector
-        `Ky` and the second element is the vector `K_mpc`.
-
-    """    
-    # Number of states
-    n = A.shape[0]
-
-    # Number of inputs
-    if B.ndim == 1:
-        m = 1
-    else:
-        m = B.shape[1]
-
-    # Number of outputs
-    if C.ndim == 1:
-        q = 1
-    else:
-        q = C.shape[0]
-
-    Rs_bar = reference_matrix(q, n_pred)
-
-    R = control_weighting_matrix(rw, n_ctl)
-
-    F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
-    Phi_t = Phi.T
-    
-    K = np.linalg.inv(Phi_t @ Phi + R + Qq) @ Phi_t
-    K_mpc = K @ F
-    Ky = K @ Rs_bar
-
-    if Ql is not None:
-        Kq = -np.linalg.inv(Phi_t @ Phi + R + Qq) @ Ql
-        Kq = Kq[:m, :]
-    else:
-        Kq = None
-    
-    return (Ky[:m], K_mpc[:m, :], Kq)
-
-
 class System:
     """A class to create a discrete-time system for model predictive control
     simulations.
@@ -427,6 +351,8 @@ class System:
         self.Ky = Ky
         self.Kx = K_mpc[:, :n_xm]
         self.Kq = Kq
+
+        self.fw.set_Kq( Kq )
 
         if x_lim is None:
             self.x_lim_idx = None
@@ -591,10 +517,8 @@ class System:
     def opt_unc(self, dx, y, r, du_1):
 
         du = - self.Ky @ (y - r) - self.Kx @ dx
-        if self.Kq is not None:
-            self.fw.update_du_past(du_1)
-            du_past = self.fw.du_past_vector()
-            du = du + self.Kq @ du_past
+        du_freq = self.fw.du_unc(du_1)
+        du = du + du_freq
         
         return du
     
