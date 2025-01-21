@@ -1,5 +1,5 @@
 import numpy as np
-import pyctl as ctl
+import pyctl
 import qpsolvers as qps
 import sys
 
@@ -400,12 +400,7 @@ class System:
 
         self.rw = rw
        
-        self.q = q
-        self.lp = lp
-        self._du_1 = None
-        self.temp_aux = 0
-
-        self.gen_freq_pen_matrices()
+        self.fw = pyctl.fw.FreqWeighting(q, lp, n_ctl, nu)
         
         # Bounds
         if type(x_lim) is list:
@@ -418,15 +413,19 @@ class System:
 
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
-        Ky, K_mpc, Kq = opt_unc_gains_freq(self.A, self.B, self.C,
-                                  self.n_pred, self.n_ctl, self.rw,
-                                  self.Qq, self.Ql)
-        #Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-        #                          self.n_pred, self.n_ctl, self.rw)
-        Kx = K_mpc[:, :n_xm]
+        if q is None:
+            Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
+                                      self.n_pred, self.n_ctl, self.rw)
+            Kq = None
+        else:
+            Ky, K_mpc, Kq = pyctl.fw.opt_unc_gains_freq(
+                self.A, self.B, self.C,
+                self.n_pred, self.n_ctl, self.rw,
+                self.fw.quad_cost_static(), self.fw.lin_cost_matrix()
+                )
 
         self.Ky = Ky
-        self.Kx = Kx
+        self.Kx = K_mpc[:, :n_xm]
         self.Kq = Kq
 
         if x_lim is None:
@@ -453,37 +452,6 @@ class System:
         
         self.c_gen = c_gen()     
 
-
-    def gen_freq_pen_matrices(self):
-
-        if self.Bm.ndim == 1:
-            nu = 1
-        else:
-            nu = self.Bm.shape[1]
-
-        if self.q is None:
-            self.Qq = np.zeros((self.n_ctl * nu, self.n_ctl * nu))
-            self.Ql = None
-            self.lp = 0
-            return
-
-        lp = self.lp * nu
-        lf = self.n_ctl * nu
-        q = self.q
-
-        N = lp + lf
-
-        W = np.zeros((N, N), dtype=complex)
-
-        for ni in range(N):
-            W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(N) / N)
-
-        Q = np.diag(q)
-        Qw = (W.conj() @ Q @ W).real / N**2
-
-        self.Ql = Qw[lp:, :lp]
-        self.Qq = Qw[lp:, lp:]
-
         
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
@@ -493,7 +461,6 @@ class System:
         Am = self.Am; Bm = self.Bm; Cm = self.Cm
         n_pred = self.n_pred; n_ctl = self.n_ctl; n_cnt = self.n_cnt
         rw = self.rw
-        Qq = self.Qq
 
         x_lim = self.x_lim
         u_lim = self.u_lim
@@ -574,7 +541,8 @@ class System:
         F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
         self.F = F; self.Phi = Phi
         
-        Ej = Phi.T @ Phi + R_bar + Qq
+        Ej = Phi.T @ Phi + R_bar
+        Ej = Ej + self.fw.quad_cost_static()
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
@@ -591,8 +559,7 @@ class System:
         x_lim = self.x_lim
 
         Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
-        if self.lp > 0:
-            Fj = Fj + self.Ql @ du_1
+        Fj = Fj + self.fw.lin_cost_dyn(du_1)
             
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
@@ -621,29 +588,24 @@ class System:
         return (Fj, y)
 
 
-    def opt(self, xm, dx, xa, ui, r, solver='hild'):
+    def opt_unc(self, dx, y, r, du_1):
+
+        du = - self.Ky @ (y - r) - self.Kx @ dx
+        if self.Kq is not None:
+            self.fw.update_du_past(du_1)
+            du_past = self.fw.du_past_vector()
+            du = du + self.Kq @ du_past
+        
+        return du
+    
+
+    def opt(self, xm, dx, xa, ui, du_1, r, solver='hild'):
 
         nu = ui.shape[0]
-
-        if self._du_1 is None:
-            self._du_1 = np.zeros((self.lp, 1))
         
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r, self._du_1)
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r, du_1)
 
         du, n_iters = self.qp(Fj, y, solver=solver)
-
-        if self.temp_aux == 0:
-            if self.lp > 0:
-                duu = np.hstack((self._du_1.reshape(-1), du))
-            else:
-                duu = du
-            self._du_0 = duu
-
-        self.temp_aux = self.temp_aux + 1
-
-        if self.lp > 0:
-            self._du_1[:self.lp - 1, 0] = self._du_1[1:self.lp, 0]
-            self._du_1[self.lp - 1, 0] = du[0]
 
         return (du[:nu], n_iters)
 
@@ -671,7 +633,7 @@ class System:
             Hj = self.Hj
             Kj = y + M @ Ej_inv @ Fj
 
-            lm, n_iters = ctl.qp.hild(Hj, Kj, n_iter=250, ret_n_iter=True)
+            lm, n_iters = pyctl.qp.hild(Hj, Kj, n_iter=250, ret_n_iter=True)
             lm = lm.reshape(-1, 1)
             du_opt = -Ej_inv @ (Fj + M.T @ lm)
             du_opt = du_opt.reshape(-1)
@@ -704,7 +666,7 @@ class System:
             Fj1 = -self.Phi.T
         Fj2 = self.Phi.T @ self.F
 
-        Fj3 = self.Ql
+        Fj3 = self.fw.lin_cost_matrix()
 
         Kj1 = self.M @ self.Ej_inv
 
@@ -807,6 +769,7 @@ class System:
         xa = np.zeros((A.shape[0], 1))
 
         u = np.zeros((n, nu))
+        du = np.zeros((n, nu))
         n_iters = np.zeros(n)
         
         xm[0] = xi
@@ -815,8 +778,6 @@ class System:
 
         Ky = self.Ky
         Kx = self.Kx
-
-        _du_1 = np.zeros((n, nu))
 
         if Bd is None:
             Bd = np.zeros(Bm.shape)
@@ -835,18 +796,15 @@ class System:
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                du = - Ky @ (y[i] - r[i]) - Kx @ dx
-                if self.lp > 0:
-                    du_past = np.roll(_du_1, self.lp - i )[:self.lp, :]
-                    du = du + self.Kq @ du_past
+                _du = self.opt_unc(dx, y[i], r[i], du[i])
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, n_it = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver) 
+                _du, n_it = self.opt(xm[i], dx, xa, u[i], du[i], r[i], solver=solver) 
                 n_iters[i] = n_it
             
-            u[i] = u[i] + du
-            _du_1[i] = du
+            du[i] = _du
+            u[i] = u[i] + du[i]
             
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
@@ -854,6 +812,7 @@ class System:
             # Update variables for next iteration
             dx = xm[i]
             u[i + 1] = u[i]
+            du[i + 1] = du[i]
 
         # Updates last value of y
         y[n - 1] = Cm @ xm[n - 1]
@@ -865,7 +824,7 @@ class System:
         results['xm'] = xm
         results['y'] = y
         results['n_iters'] = n_iters
-        results['du'] = _du_1 
+        results['du'] = du 
 
         return results
 
