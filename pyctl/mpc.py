@@ -376,7 +376,9 @@ class System:
 
         self.y_idx = np.array(y_idx)
         
-        self.c_gen = c_gen()     
+        self.c_gen = c_gen()
+
+        self._du_0 = None
 
         
     def gen_static_qp_matrices(self):
@@ -485,8 +487,11 @@ class System:
         x_lim = self.x_lim
 
         Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
-        Fj = Fj + self.fw.lin_cost_dyn(du_1)
-            
+        #print(Fj)
+        #Fj = Fj + self.fw.lin_cost_dyn(du_1)
+        Fj = Fj + self.fw.lin_cost_dyn(ui)
+        #print(Fj)
+        
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
         y = None
@@ -514,12 +519,17 @@ class System:
         return (Fj, y)
 
 
-    def opt_unc(self, dx, y, r, du_1):
+    def opt_unc(self, dx, y, r, ui, du_1):
 
         du = - self.Ky @ (y - r) - self.Kx @ dx
-        du_freq = self.fw.du_unc(du_1)
+        #du_freq = self.fw.du_unc(du_1)
+        du_freq = self.fw.du_unc(ui)
         du = du + du_freq
-        
+
+        if self._du_0 is None:
+            self._du_0 = du
+            self._u_0 = np.tri(du.shape[0]) @ du
+                
         return du
     
 
@@ -531,6 +541,10 @@ class System:
 
         du, n_iters = self.qp(Fj, y, solver=solver)
 
+        if self._du_0 is None:
+            self._du_0 = du
+            self._u_0 = np.tri(du.shape[0]) @ du
+            
         return (du[:nu], n_iters)
 
     
@@ -720,13 +734,13 @@ class System:
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                _du = self.opt_unc(dx, y[i], r[i], du[i])
+                _du = self.opt_unc(dx, y[i], r[i], u[i], du[i])
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
                 _du, n_it = self.opt(xm[i], dx, xa, u[i], du[i], r[i], solver=solver) 
                 n_iters[i] = n_it
-            
+                
             du[i] = _du
             u[i] = u[i] + du[i]
             
