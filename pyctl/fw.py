@@ -70,11 +70,12 @@ def opt_unc_gains_freq(A, B, C, n_pred, n_ctl, rw, Qq, Ql):
     K_mpc = K @ F
     Ky = K @ Rs_bar
 
-    if Ql is not None:
-        Kq = -np.linalg.inv(Phi_t @ Phi + R + Qq) @ Ql
-        Kq = Kq[:m, :]
-    else:
-        Kq = None
+    Kq = 0    
+    #if Ql is not None:
+    #    Kq = -np.linalg.inv(Phi_t @ Phi + R + Qq) @ Ql
+    #    Kq = Kq[:m, :]
+    #else:
+    #    Kq = None
     
     return (Ky[:m], K_mpc[:m, :], Kq)
 
@@ -114,7 +115,7 @@ class FreqWeighting:
         
         U_1 = np.ones((n * self.nu, 1)) * ui
         #print(U_1)
-        lin_cost = np.tri(n).T @ self.Qq.T @ U_1
+        lin_cost = np.tri(n).T @ self.Qw.T @ U_1
         #print(lin_cost)
         lin_cost = lin_cost[0,0]
         #print(lin_cost)
@@ -138,7 +139,7 @@ class FreqWeighting:
         
         U_1 = np.ones((n * self.nu, 1)) * ui
         #print(U_1)
-        lin_cost = np.tri(n).T @ self.Qq.T @ U_1
+        lin_cost = np.tri(n).T @ self.Qw.T @ U_1
         #print('lin cost', lin_cost.shape)
         #print(lin_cost)
             
@@ -173,6 +174,7 @@ class FreqWeighting:
         Q = np.diag(self.q)
         Qw = (W.conj() @ Q @ W).real / N**2
 
+        self.Qw = (W.conj() @ Q @ W).real / N**2
         self.Qq = np.tri(N).T @ Qw @ np.tri(N)
 
 
