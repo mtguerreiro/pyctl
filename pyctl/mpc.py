@@ -1,9 +1,15 @@
 import numpy as np
+import scipy
+
 import pyctl as ctl
 import qpsolvers as qps
-import sys
 
+import sys
 import ctypes
+
+import os
+from shutil import copytree, ignore_patterns
+
 
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
@@ -532,7 +538,7 @@ class System:
         c_float_p = ctypes.POINTER(ctypes.c_float)
         
         if self._qp_c is None:
-            self._qp_c = ctypes.CDLL('../cdmpc_tst/libcdmpc_py.so')
+            self._qp_c = ctypes.CDLL('/home/marco/Desktop/ctst/c/cdmpc/build/libcdmpc_py.so')
             self._qp_c.cdmpc_py_step.argtypes = (
                 c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
                 )
@@ -575,16 +581,8 @@ class System:
             du_opt = -Ej_inv @ (Fj + M.T @ lm)
             du_opt = du_opt.reshape(-1)
 
-        elif solver == 'cvx':
-            du_opt = qps.cvxopt_solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1))
-            n_iters = 0
-
-        elif solver == 'quadprog':
-            du_opt = qps.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1))
-            n_iters = 0
-
         else:
-            du_opt = 0
+            du_opt = qps.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1), solver=solver)
             n_iters = 0
 
         return (du_opt, n_iters)
@@ -705,6 +703,8 @@ class System:
 
         u = np.zeros((n, nu))
 
+        n_iters = np.zeros((n, 1))
+        
         xm[0] = xi
         dx = xm[0]
         u[0] = ui
@@ -730,12 +730,14 @@ class System:
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
                 du = -Ky @ (y[i] - r[i]) + -Kx @ dx
+                n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, _ = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver) 
+                du, n_iter = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver)
             
             u[i] = u[i] + du
+            n_iters[i] = n_iter
 
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
@@ -751,6 +753,7 @@ class System:
         results['u'] = u
         results['xm'] = xm
         results['y'] = y
+        results['n_iters'] = n_iters
 
         return results
 
@@ -849,8 +852,15 @@ class System:
 
         return defs
 
-    
-    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
+
+    def copy_static_sources(self, path=''):
+
+        src = os.path.dirname( os.path.dirname(ctl.__file__) )
+        src = src + '/cdmpc/'
+        copytree(src, path, dirs_exist_ok=True)
+
+
+    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
         
         if prefix is None:
             file_prefix = ''
@@ -864,6 +874,9 @@ class System:
         defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
 
         if file_path is not None:
+            if copy_cdmpc_src is True:
+                self.copy_static_sources(path=file_path)
+                
             with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
                 efile.write(src_txt)
             with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:

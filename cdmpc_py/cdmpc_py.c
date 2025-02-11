@@ -1,6 +1,6 @@
 
 #include <stdint.h>
-#include "dmpc.h"
+#include "cdmpc/dmpc.h"
 
 
 int cdmpc_py_step(float *xm, float *xm_1, 
