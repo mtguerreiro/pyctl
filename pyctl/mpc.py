@@ -362,9 +362,6 @@ class System:
             # Initializes static qp matrices
             self.gen_static_qp_matrices()
 
-            # Creates Hildreth's static matrix        
-            self.Hj = self.M @ self.Ej_inv @ self.M.T
-
         # Creates index vector of outputs
         y_idx = []
         if Cm.ndim != 1:
@@ -374,7 +371,7 @@ class System:
 
         self.y_idx = np.array(y_idx)
         
-        self.c_gen = pyctl.code_gen.c_gen()
+        #self.c_gen = pyctl.code_gen.c_gen()
 
         self._qp_c = None
 
@@ -470,6 +467,9 @@ class System:
         Ej = Phi.T @ Phi + R_bar
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
+
+        # Creates Hildreth's static matrix        
+        self.Hj = self.M @ self.Ej_inv @ self.M.T
 
 
     def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
@@ -860,6 +860,46 @@ class System:
         copytree(src, path, dirs_exist_ok=True)
 
 
+    def test(self):
+
+        model = pyctl.code_gen.CodeGenData
+        model.Am = self.Am
+        model.Bm = self.Bm
+        model.Cm = self.Cm
+
+        model.n_pred = self.n_pred
+        model.n_ctl = self.n_ctl
+        model.n_cnt = self.n_cnt
+        
+        model.u_lim = self.u_lim
+        model.u_lim_idx = self.u_lim_idx
+
+        model.x_lim = self.x_lim
+        model.x_lim_idx = self.x_lim_idx
+
+        model.y_idx = self.y_idx
+
+        model.R_bar = self.R_bar
+        model.Rs_bar = self.Rs_bar
+
+        model.M = self.M
+        model.Mx_aux = self.Mx_aux
+
+        model.Fx = self.Fx
+        model.Phi_x = self.Phi_x
+
+        model.F = self.F
+        model.Phi = self.Phi
+
+        model.Ej = self.Ej
+        model.Hj = self.Hj
+
+        model.Kx = self.Kx
+        model.Ky = self.Ky
+        
+        self.cgen = pyctl.code_gen.Hildreth(model)
+
+    
     def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
         
         if prefix is None:
@@ -869,9 +909,10 @@ class System:
 
         np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
 
-        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
-        header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
-        defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
+        
+        #src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
+        #header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
+        #defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
 
         if file_path is not None:
             if copy_cdmpc_src is True:

@@ -10,6 +10,34 @@ from shutil import copytree, ignore_patterns
 
 from dataclasses import dataclass
 
+
+def _export_np_array_to_c(arr, arr_name, fill=True):
+
+    if arr.ndim == 1:
+        n = arr.shape[0]
+        m = 1
+    else:
+        if (arr.shape[0] == 1) or (arr.shape[1] == 1):
+            arr = arr.flatten()
+            n = arr.shape[0]
+            m = 1
+        else:
+            n, m = arr.shape
+
+    arr_str = np.array2string(arr, separator=',')
+    arr_str = arr_str.replace('[', '{')
+    arr_str = arr_str.replace(']', '}')
+
+    if m == 1:
+        arr_txt = '{:}[{:}];'.format(arr_name, n)
+    else:
+        arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
+
+    if fill is True:
+        arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
+        
+    return arr_txt
+    
 @dataclass
 class CodeGenData:
 
@@ -21,75 +49,166 @@ class CodeGenData:
     n_ctl : int
     n_cnt : int
 
+    u_lim = np.ndarray
+    u_lim_idx = np.ndarray
+
+    x_lim = np.ndarray
+    x_lim_idx = np.ndarray
+
+    y_idx = np.ndarray
+    
+    R_bar : np.ndarray
+    Rs_bar : np.ndarray
+
+    M : np.ndarray
+    Mx_aux : np.ndarray
+
+    Fx : np.ndarray
+    Phi_x : np.ndarray
+
+    F : np.ndarray    
     Phi : np.ndarray
-    RS_bar : np.ndarray
-    F : np.ndarray
-    
 
-    
-def hild_matrices(self, ref='constant'):
+    Ej : np.ndarray
+    Hj : np.ndarray
 
-    if self.Bm.ndim == 1:
-        m = 1
-    else:
-        m = self.Bm.shape[1]
-    
-    if ref == 'constant':
-        Fj1 = -self.Phi.T @ self.Rs_bar
-    else:
-        Fj1 = -self.Phi.T
-    Fj2 = self.Phi.T @ self.F
+    Kx : np.ndarray
+    Ky : np.ndarray
 
-    Kj1 = self.M @ self.Ej_inv
 
-    if self.x_lim is None:
-        Fx = np.zeros((1,1))
-    else:
-        Fx = self.Mx_aux @ self.Fx
+class Hildreth:
 
-    Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
-    Hj[:] = self.Hj[:]
-    Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+    def __init__(self, model):
 
-    #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
-    
-    DU1 = (-self.Ej_inv)[:m, :]
-    DU2 = (-self.Ej_inv @ self.M.T)[:m, :]
+        self.model = model
 
-    return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
-    
-class c_gen:
 
-    def __init__(self):
-        pass
-    
-    def _export_np_array_to_c(self, arr, arr_name, fill=True):
+    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
 
-        if arr.ndim == 1:
-            n = arr.shape[0]
+        u_lim = self.model.u_lim
+        x_lim = self.model.x_lim
+        
+        # Matrices for Hildreth's QP procedure
+        if (u_lim is not None) or (x_lim is not None):
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
+        
+        header = self.header(ftype=ftype, prefix=prefix)
+
+        includes, end = self.includes(ftype=ftype, prefix=prefix)
+
+        if u_lim is not None:
+            u_lim = u_lim / scaling
+        in_cnt = self.cnt(u_lim, self.model.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
+
+        if x_lim is not None:
+            x_lim = x_lim / scaling
+
+        st_cnt = self.cnt(x_lim, self.model.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
+        
+        out_idx = self.output_idx(self.model.y_idx, ftype=ftype, prefix=prefix)
+
+        pred_matrices = self.Am_Bm_matrices_pred(self.model.Am, self.model.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
+
+        kx_ky_gains = self.Kx_Ky_gains(self.model.Kx, self.model.Ky, ftype=ftype, prefix=prefix)
+        
+        if (u_lim is not None) or (x_lim is not None):
+            qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
+            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
+        else:
+            qp_matrices = ''
+            hild_matrices = ''
+        
+        txt = header + includes + in_cnt + st_cnt +\
+              out_idx + pred_matrices + kx_ky_gains +\
+              qp_matrices + hild_matrices +\
+              end
+
+        return txt
+
+
+    def _gen_defs(self, scaling=1.0, Bd=None, prefix=None):
+
+        x_lim = self.model.x_lim
+        u_lim = self.model.u_lim
+        
+        n_xm = self.model.Am.shape[0]
+        n_xa = self.model.A.shape[0]
+        n_pred = self.model.n_pred
+        n_ctl = self.model.n_ctl
+
+        if (x_lim is not None) or (u_lim is not None):
+            n_cnt = self.model.n_cnt
+            n_lambda = self.model.M.shape[0]
+        else:
+            n_cnt = 0
+            n_lambda = 0
+
+        if self.model.Cm.ndim == 1:
+            ny = 1
+        else:
+            ny = self.model.Cm.shape[0]
+        
+        if self.model.Bm.ndim == 1:
+            nu = 1
+        else:
+            nu = self.model.Bm.shape[1]
+
+        if Bd is None:
+            nd = 0
+        else:
+            if Bd.model.ndim == 1:
+                nd = 1
+            else:
+                nd = Bd.shape[1]
+
+        n_in_cnt = 0
+        if self.model.u_lim_idx is not None:
+            n_in_cnt = self.model.u_lim_idx.shape[0]
+
+        n_st_cnt = 0
+        if self.model.x_lim_idx is not None:
+            n_st_cnt = self.model.x_lim_idx.shape[0]
+        
+        defs = self.c_gen.defs_header(n_xm, n_xa, ny, nu, nd,
+                               n_pred, n_ctl, n_cnt, n_lambda,
+                               n_in_cnt, n_st_cnt,
+                               scaling=scaling,
+                               prefix=prefix)
+
+        return defs
+
+
+    def hild_matrices(self, ref='constant'):
+
+        Ej_inv = np.linalg.inv(self.model.Ej)
+        
+        if self.model.Bm.ndim == 1:
             m = 1
         else:
-            if (arr.shape[0] == 1) or (arr.shape[1] == 1):
-                arr = arr.flatten()
-                n = arr.shape[0]
-                m = 1
-            else:
-                n, m = arr.shape
-
-        arr_str = np.array2string(arr, separator=',')
-        arr_str = arr_str.replace('[', '{')
-        arr_str = arr_str.replace(']', '}')
-
-        if m == 1:
-            arr_txt = '{:}[{:}];'.format(arr_name, n)
+            m = self.model.Bm.shape[1]
+        
+        if ref == 'constant':
+            Fj1 = -self.model.Phi.T @ self.model.Rs_bar
         else:
-            arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
+            Fj1 = -self.model.Phi.T
+        Fj2 = self.model.Phi.T @ self.model.F
 
-        if fill is True:
-            arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
-            
-        return arr_txt
-    
+        Kj1 = self.model.M @ Ej_inv
+
+        if self.model.x_lim is None:
+            Fx = np.zeros((1,1))
+        else:
+            Fx = self.model.Mx_aux @ self.model.Fx
+
+        Hj = np.zeros(self.model.Hj.shape, dtype=self.model.Hj.dtype)
+        Hj[:] = self.model.Hj[:]
+        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+
+        DU1 = (-Ej_inv)[:m, :]
+        DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
+
+        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
+
 
     def header(self, ftype='src', prefix=None):
 
@@ -175,9 +294,9 @@ class c_gen:
         max_txt = extern + 'float {:}{:}_MAX'.format(prefix, cnt_txt)
         lim_idx_txt = extern + 'uint32_t {:}{:}_LIM_IDX'.format(prefix, cnt_txt)
 
-        min_txt = self._export_np_array_to_c(lim[0] / scaling, min_txt, fill=fill) + '\n'
-        max_txt = self._export_np_array_to_c(lim[1] / scaling, max_txt, fill=fill) + '\n'
-        lim_idx_txt = self._export_np_array_to_c(idx, lim_idx_txt, fill=fill) + '\n'
+        min_txt = _export_np_array_to_c(lim[0] / scaling, min_txt, fill=fill) + '\n'
+        max_txt = _export_np_array_to_c(lim[1] / scaling, max_txt, fill=fill) + '\n'
+        lim_idx_txt = _export_np_array_to_c(idx, lim_idx_txt, fill=fill) + '\n'
 
         txt = '\n' + comment + min_txt + max_txt + lim_idx_txt
         
@@ -200,7 +319,7 @@ class c_gen:
         comment = '/* Index of ouputs */\n'
         y_idx_txt = extern + 'uint32_t {:}DMPC_CONFIG_Y_IDX'.format(prefix)
 
-        idx_txt = self._export_np_array_to_c(idx, y_idx_txt, fill=fill) + '\n'
+        idx_txt = _export_np_array_to_c(idx, y_idx_txt, fill=fill) + '\n'
 
         txt = '\n' + comment + idx_txt
         
@@ -236,8 +355,8 @@ class c_gen:
         A_txt = extern + 'float {:}DMPC_M_A'.format(prefix)
         B_txt = extern + 'float {:}DMPC_M_B'.format(prefix)
 
-        A_txt = self._export_np_array_to_c(Am, A_txt, fill=fill) + '\n'
-        B_txt = self._export_np_array_to_c(B, B_txt, fill=fill) + '\n'
+        A_txt = _export_np_array_to_c(Am, A_txt, fill=fill) + '\n'
+        B_txt = _export_np_array_to_c(B, B_txt, fill=fill) + '\n'
 
         txt = '\n' + comment + A_txt + nl + B_txt
         
@@ -264,8 +383,8 @@ class c_gen:
         Kx_txt = extern + 'float {:}DMPC_Kx'.format(prefix)
         Ky_txt = extern + 'float {:}DMPC_Ky'.format(prefix)
 
-        Kx_txt = self._export_np_array_to_c(Kx, Kx_txt, fill=fill) + '\n'
-        Ky_txt = self._export_np_array_to_c(Ky, Ky_txt, fill=fill) + '\n'
+        Kx_txt = _export_np_array_to_c(Kx, Kx_txt, fill=fill) + '\n'
+        Ky_txt = _export_np_array_to_c(Ky, Ky_txt, fill=fill) + '\n'
 
         txt = '\n' + comment + Kx_txt + nl + Ky_txt
         
@@ -316,18 +435,18 @@ class c_gen:
         Fj = np.zeros(n)
         gam = np.zeros(m)
         
-        Ej_txt = self._export_np_array_to_c(Ej, Ej_txt, fill=fill) + '\n'
-        Fj_txt = self._export_np_array_to_c(Fj, Fj_txt, fill=False) + '\n'
+        Ej_txt = _export_np_array_to_c(Ej, Ej_txt, fill=fill) + '\n'
+        Fj_txt = _export_np_array_to_c(Fj, Fj_txt, fill=False) + '\n'
 
-        M_txt = self._export_np_array_to_c(M, M_txt, fill=fill) + '\n'
-        gam_txt = self._export_np_array_to_c(gam, gam_txt, fill=False) + '\n'
+        M_txt = _export_np_array_to_c(M, M_txt, fill=fill) + '\n'
+        gam_txt = _export_np_array_to_c(gam, gam_txt, fill=False) + '\n'
 
         txt = comment + Ej_txt + Fj_txt + M_txt + gam_txt
 
         return txt
     
 
-    def hild_matrices(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
+    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
         
         if prefix is None:
             prefix = ''
@@ -345,25 +464,25 @@ class c_gen:
         comments = '\n/* Matrices for Hildreth\'s QP procedure */\n'
         
         Fj1_txt = extern + 'float {:}DMPC_M_Fj_1'.format(prefix)
-        Fj1_txt = self._export_np_array_to_c(Fj1, Fj1_txt, fill=fill) + '\n'
+        Fj1_txt = _export_np_array_to_c(Fj1, Fj1_txt, fill=fill) + '\n'
         
         Fj2_txt = nl + extern + 'float {:}DMPC_M_Fj_2'.format(prefix)
-        Fj2_txt = self._export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
+        Fj2_txt = _export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
         
         Fx_txt = nl + extern + 'float {:}DMPC_M_Fx'.format(prefix)
-        Fx_txt = self._export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
+        Fx_txt = _export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
         
         Kj1_txt = nl + extern + 'float {:}DMPC_M_Kj_1'.format(prefix)
-        Kj1_txt = self._export_np_array_to_c(Kj1, Kj1_txt, fill=fill) + '\n'
+        Kj1_txt = _export_np_array_to_c(Kj1, Kj1_txt, fill=fill) + '\n'
         
         Hj_txt = nl + extern + 'float {:}DMPC_M_Hj'.format(prefix)
-        Hj_txt = self._export_np_array_to_c(Hj, Hj_txt, fill=fill) + '\n'
+        Hj_txt = _export_np_array_to_c(Hj, Hj_txt, fill=fill) + '\n'
         
         DU1_txt = nl + extern + 'float {:}DMPC_M_DU_1'.format(prefix)
-        DU1_txt = self._export_np_array_to_c(DU1, DU1_txt, fill=fill) + '\n'
+        DU1_txt = _export_np_array_to_c(DU1, DU1_txt, fill=fill) + '\n'
         
         DU2_txt = nl + extern + 'float {:}DMPC_M_DU_2'.format(prefix)
-        DU2_txt = self._export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
+        DU2_txt = _export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
 
         txt = comments + \
               Fj1_txt + Fj2_txt + Fx_txt +\
@@ -453,3 +572,11 @@ class c_gen:
                    guard_end_txt
         
         return defs_txt
+
+    
+class c_gen:
+
+    def __init__(self):
+        pass
+    
+    
