@@ -1,79 +1,23 @@
 import numpy as np
-
-import pyctl
+import scipy
+import scipy.signal
 
 import sys
-import ctypes
-
 import os
 from shutil import copytree, ignore_patterns
 
 from dataclasses import dataclass
 
+import osqp
 
-def _export_np_array_to_c(arr, arr_name, fill=True):
 
-    if arr.ndim == 1:
-        n = arr.shape[0]
-        m = 1
-    else:
-        if (arr.shape[0] == 1) or (arr.shape[1] == 1):
-            arr = arr.flatten()
-            n = arr.shape[0]
-            m = 1
-        else:
-            n, m = arr.shape
+def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
 
-    arr_str = np.array2string(arr, separator=',')
-    arr_str = arr_str.replace('[', '{')
-    arr_str = arr_str.replace(']', '}')
+    _hild = Hildreth(model)
+    _hild.gen(file_path=file_path, prefix=prefix, scaling=scaling, Bd=Bd, ref=ref, copy_cdmpc_src=False)
 
-    if m == 1:
-        arr_txt = '{:}[{:}];'.format(arr_name, n)
-    else:
-        arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
-
-    if fill is True:
-        arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
-        
-    return arr_txt
-    
-@dataclass
-class CodeGenData:
-
-    Am : np.ndarray
-    Bm : np.ndarray
-    Cm : np.ndarray
-
-    n_pred : int
-    n_ctl : int
-    n_cnt : int
-
-    u_lim = np.ndarray
-    u_lim_idx = np.ndarray
-
-    x_lim = np.ndarray
-    x_lim_idx = np.ndarray
-
-    y_idx = np.ndarray
-    
-    R_bar : np.ndarray
-    Rs_bar : np.ndarray
-
-    M : np.ndarray
-    Mx_aux : np.ndarray
-
-    Fx : np.ndarray
-    Phi_x : np.ndarray
-
-    F : np.ndarray    
-    Phi : np.ndarray
-
-    Ej : np.ndarray
-    Hj : np.ndarray
-
-    Kx : np.ndarray
-    Ky : np.ndarray
+    _osqp = OSQP(model)
+    _osqp.gen(file_path=file_path, scaling=scaling)
 
 
 class Hildreth:
@@ -83,6 +27,33 @@ class Hildreth:
         self.model = model
 
 
+    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
+        
+        if prefix is None:
+            file_prefix = ''
+        else:
+            file_prefix = prefix.lower() + '_'
+
+        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
+
+        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
+        header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
+        defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
+
+        if file_path is not None:
+            if copy_cdmpc_src is True:
+                self.copy_static_sources(path=file_path)
+                
+            with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
+                efile.write(src_txt)
+            with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:
+                efile.write(header_txt)
+            with open(file_path + file_prefix + 'dmpc_defs.h', 'w') as efile:
+                efile.write(defs_txt)
+                
+        np.set_printoptions(floatmode='fixed', threshold=1000)
+        
+        
     def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
 
         u_lim = self.model.u_lim
@@ -156,7 +127,7 @@ class Hildreth:
         if Bd is None:
             nd = 0
         else:
-            if Bd.model.ndim == 1:
+            if Bd.ndim == 1:
                 nd = 1
             else:
                 nd = Bd.shape[1]
@@ -169,11 +140,13 @@ class Hildreth:
         if self.model.x_lim_idx is not None:
             n_st_cnt = self.model.x_lim_idx.shape[0]
         
-        defs = self.c_gen.defs_header(n_xm, n_xa, ny, nu, nd,
-                               n_pred, n_ctl, n_cnt, n_lambda,
-                               n_in_cnt, n_st_cnt,
-                               scaling=scaling,
-                               prefix=prefix)
+        defs = self.defs_header(
+            n_xm, n_xa, ny, nu, nd,
+            n_pred, n_ctl, n_cnt, n_lambda,
+            n_in_cnt, n_st_cnt,
+            scaling=scaling,
+            prefix=prefix
+        )
 
         return defs
 
@@ -573,10 +546,154 @@ class Hildreth:
         
         return defs_txt
 
-    
-class c_gen:
 
-    def __init__(self):
-        pass
+class OSQP:
+
+    def __init__(self, model):
+        
+        self.model = model
+
+
+    def gen(self, file_path = '', scaling=1.0):
+
+        (P, q, A, l, u) = self.gen_osqp_matrices(scaling=scaling)
+
+        prob = osqp.OSQP()
+
+        prob.setup(
+            P, q, A, l, u,
+            scaled_termination=False,
+            check_termination=0,
+            max_iter=40,
+            warm_start=False,
+            #eps_abs=1e-5, eps_rel=1e-5,
+            scaling=100,
+            adaptive_rho=False
+        )
+
+        osqp_src_gen = file_path + r'/osqp_code_gen'
+        osqp_src_copy = file_path + r'/osqp'
+
+        prob.codegen(
+            osqp_src_gen,
+            parameters='vectors',
+            force_rewrite=True,
+            FLOAT=True, LONG=False,
+            compile_python_ext=False
+        )
+
+        copytree(
+            osqp_src_gen + r'/include', osqp_src_copy,
+            dirs_exist_ok=True, ignore=ignore_patterns('*qdldl_types.h')
+        )
+
+        copytree(
+            osqp_src_gen + r'/src/osqp', osqp_src_copy,
+            dirs_exist_ok=True
+        )
+
+        
+    def gen_osqp_matrices(self, scaling=1.0):
+
+        n_cnt = self.model.n_cnt
+        nu = self.model.Bm.shape[1]
+        nx_cnt = self.model.x_lim.shape[1] if self.model.x_lim is not None else 0
+        
+        bounds_size = round( self.model.M.shape[0] / 2 )
+        lin_cost_size = self.model.Ej.shape[0]
+
+        P = self.model.Ej
+        P = scipy.sparse.csc_matrix(P)
+
+        A = np.zeros([bounds_size, lin_cost_size])
+        A[:(nu * n_cnt), :] = self.model.M[ nu * n_cnt : 2 * (nu * n_cnt), : ]
+        A[(nu * n_cnt):, :] = self.model.M[ (2 * nu + nx_cnt) * n_cnt :, :]
+        A = scipy.sparse.csc_matrix(A)
+
+        l = np.zeros(bounds_size)
+        l[:(nu * n_cnt)] = self.model.u_lim[0, 0]
+        l[(nu * n_cnt):] = self.model.x_lim[0, 0]
+
+        u = np.zeros(bounds_size)
+        u[:(nu * n_cnt)] = self.model.u_lim[1, 0]
+        u[(nu * n_cnt):] = self.model.x_lim[1, 0]
+
+        q = -self.model.Phi.T @ self.model.Rs_bar @ np.ones(nu) / 1000
+
+        return (P, q, A, l, u)
+        
+def _export_np_array_to_c(arr, arr_name, fill=True):
+
+    if arr.ndim == 1:
+        n = arr.shape[0]
+        m = 1
+    else:
+        if (arr.shape[0] == 1) or (arr.shape[1] == 1):
+            arr = arr.flatten()
+            n = arr.shape[0]
+            m = 1
+        else:
+            n, m = arr.shape
+
+    arr_str = np.array2string(arr, separator=',')
+    arr_str = arr_str.replace('[', '{')
+    arr_str = arr_str.replace(']', '}')
+
+    if m == 1:
+        arr_txt = '{:}[{:}];'.format(arr_name, n)
+    else:
+        arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
+
+    if fill is True:
+        arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
+        
+    return arr_txt
+
+
+def _copy_cdmpc_static_sources(self, path=''):
+
+    src = os.path.dirname( os.path.dirname(pyctl.__file__) )
+    src = src + '/cdmpc/'
+    copytree(src, path, dirs_exist_ok=True)
+
     
+@dataclass
+class CodeGenData:
+
+    Am : np.ndarray
+    Bm : np.ndarray
+    Cm : np.ndarray
+
+    A : np.ndarray
+    B : np.ndarray
+    C : np.ndarray
     
+    n_pred : int
+    n_ctl : int
+    n_cnt : int
+
+    u_lim = np.ndarray
+    u_lim_idx = np.ndarray
+
+    x_lim = np.ndarray
+    x_lim_idx = np.ndarray
+
+    y_idx = np.ndarray
+    
+    R_bar : np.ndarray
+    Rs_bar : np.ndarray
+
+    M : np.ndarray
+    Mx_aux : np.ndarray
+
+    Fx : np.ndarray
+    Phi_x : np.ndarray
+
+    F : np.ndarray    
+    Phi : np.ndarray
+
+    Ej : np.ndarray
+    Hj : np.ndarray
+
+    Kx : np.ndarray
+    Ky : np.ndarray

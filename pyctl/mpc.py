@@ -538,7 +538,8 @@ class System:
         c_float_p = ctypes.POINTER(ctypes.c_float)
         
         if self._qp_c is None:
-            self._qp_c = ctypes.CDLL('/home/marco/Downloads/tie/c/build/libcdmpc_py.so')
+            #self._qp_c = ctypes.CDLL('/home/marco/Downloads/tie/c/build/libcdmpc_py.so')
+            self._qp_c = ctypes.CDLL('C:/Users/mguerreiro/Desktop/tie/c/build/libcdmpc_py.dll')
             self._qp_c.cdmpc_py_step.argtypes = (
                 c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
                 )
@@ -586,38 +587,6 @@ class System:
             n_iters = 0
 
         return (du_opt, n_iters)
-
-
-    def hild_matrices(self, ref='constant'):
-
-        if self.Bm.ndim == 1:
-            m = 1
-        else:
-            m = self.Bm.shape[1]
-        
-        if ref == 'constant':
-            Fj1 = -self.Phi.T @ self.Rs_bar
-        else:
-            Fj1 = -self.Phi.T
-        Fj2 = self.Phi.T @ self.F
-
-        Kj1 = self.M @ self.Ej_inv
-
-        if self.x_lim is None:
-            Fx = np.zeros((1,1))
-        else:
-            Fx = self.Mx_aux @ self.Fx
-
-        Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
-        Hj[:] = self.Hj[:]
-        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
-
-        #Hj_fxp = (Hj * (2 ** qbase)).astype(np.int64)
-        
-        DU1 = (-self.Ej_inv)[:m, :]
-        DU2 = (-self.Ej_inv @ self.M.T)[:m, :]
-
-        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
     
 
     def sim(self, xi, ui, r, n, Bd=None, ud=None, solver='hild'):
@@ -757,112 +726,27 @@ class System:
 
         return results
 
-
-    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
-
-        u_lim = self.u_lim
-        x_lim = self.x_lim
-        
-        # Matrices for Hildreth's QP procedure
-        if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
-        
-        header = self.c_gen.header(ftype=ftype, prefix=prefix)
-
-        includes, end = self.c_gen.includes(ftype=ftype, prefix=prefix)
-
-        if u_lim is not None:
-            u_lim = u_lim / scaling
-        in_cnt = self.c_gen.cnt(u_lim, self.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
-
-        if x_lim is not None:
-            x_lim = x_lim / scaling
-
-        st_cnt = self.c_gen.cnt(x_lim, self.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
-        
-        out_idx = self.c_gen.output_idx(self.y_idx, ftype=ftype, prefix=prefix)
-
-        pred_matrices = self.c_gen.Am_Bm_matrices_pred(self.Am, self.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
-
-        kx_ky_gains = self.c_gen.Kx_Ky_gains(self.Kx, self.Ky, ftype=ftype, prefix=prefix)
-        
-        if (u_lim is not None) or (x_lim is not None):
-            qp_matrices = self.c_gen.qp_matrices(self.Ej, self.M, ftype=ftype, prefix=prefix)
-            hild_matrices = self.c_gen.hild_matrices(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
-        else:
-            qp_matrices = ''
-            hild_matrices = ''
-        
-        txt = header + includes + in_cnt + st_cnt +\
-              out_idx + pred_matrices + kx_ky_gains +\
-              qp_matrices + hild_matrices +\
-              end
-
-        return txt
     
-
-    def _gen_defs(self, scaling=1.0, Bd=None, prefix=None):
-
-        x_lim = self.x_lim
-        u_lim = self.u_lim
+    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
         
-        n_xm = self.Am.shape[0]
-        n_xa = self.A.shape[0]
-        n_pred = self.n_pred
-        n_ctl = self.n_ctl
-
-        if (x_lim is not None) or (u_lim is not None):
-            n_cnt = self.n_cnt
-            n_lambda = self.M.shape[0]
-        else:
-            n_cnt = 0
-            n_lambda = 0
-
-        if self.Cm.ndim == 1:
-            ny = 1
-        else:
-            ny = self.Cm.shape[0]
-        
-        if self.Bm.ndim == 1:
-            nu = 1
-        else:
-            nu = self.Bm.shape[1]
-
-        if Bd is None:
-            nd = 0
-        else:
-            if Bd.ndim == 1:
-                nd = 1
-            else:
-                nd = Bd.shape[1]
-
-        n_in_cnt = 0
-        if self.u_lim_idx is not None:
-            n_in_cnt = self.u_lim_idx.shape[0]
-
-        n_st_cnt = 0
-        if self.x_lim_idx is not None:
-            n_st_cnt = self.x_lim_idx.shape[0]
-        
-        defs = self.c_gen.defs_header(n_xm, n_xa, ny, nu, nd,
-                               n_pred, n_ctl, n_cnt, n_lambda,
-                               n_in_cnt, n_st_cnt,
-                               scaling=scaling,
-                               prefix=prefix)
-
-        return defs
+        model = self._get_code_gen_model()
+        pyctl.code_gen.gen(
+            model,
+            file_path=file_path, prefix=prefix,
+            scaling=scaling, Bd=Bd,
+            ref=ref,
+            copy_cdmpc_src=False
+        )
 
 
-    def copy_static_sources(self, path=''):
-
-        src = os.path.dirname( os.path.dirname(pyctl.__file__) )
-        src = src + '/cdmpc/'
-        copytree(src, path, dirs_exist_ok=True)
-
-
-    def test(self):
+    def _get_code_gen_model(self):
 
         model = pyctl.code_gen.CodeGenData
+
+        model.A = self.A
+        model.B = self.B
+        model.C = self.C
+        
         model.Am = self.Am
         model.Bm = self.Bm
         model.Cm = self.Cm
@@ -896,33 +780,5 @@ class System:
 
         model.Kx = self.Kx
         model.Ky = self.Ky
-        
-        self.cgen = pyctl.code_gen.Hildreth(model)
 
-    
-    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
-        
-        if prefix is None:
-            file_prefix = ''
-        else:
-            file_prefix = prefix.lower() + '_'
-
-        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
-
-        
-        #src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
-        #header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
-        #defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
-
-        if file_path is not None:
-            if copy_cdmpc_src is True:
-                self.copy_static_sources(path=file_path)
-                
-            with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
-                efile.write(src_txt)
-            with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:
-                efile.write(header_txt)
-            with open(file_path + file_prefix + 'dmpc_defs.h', 'w') as efile:
-                efile.write(defs_txt)
-                
-        np.set_printoptions(floatmode='fixed', threshold=1000)
+        return model
