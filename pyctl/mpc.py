@@ -352,9 +352,7 @@ class System:
         if u_lim is None:
             self.u_lim_idx = None
 
-        if (x_lim is not None) or (u_lim is not None):
-            # Initializes static qp matrices
-            self.gen_static_qp_matrices()
+        self.gen_static_qp_matrices()
 
         # Creates index vector of outputs
         y_idx = []
@@ -460,8 +458,11 @@ class System:
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
-        # Creates Hildreth's static matrix        
-        self.Hj = self.M @ self.Ej_inv @ self.M.T
+        if (x_lim is not None) or (u_lim is not None):
+            # Creates Hildreth's static matrix        
+            self.Hj = self.M @ self.Ej_inv @ self.M.T
+        else:
+            self.Hj = None
 
 
     def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
@@ -513,35 +514,6 @@ class System:
 
         return (du[:nu], n_iters)
 
-
-    def qp_c(self, xm, dx, xa, ui, r):
-
-        xm_1 = xm - dx
-
-        xm = xm.astype(np.float32)
-        xm_1 = xm_1.astype(np.float32)
-        dx = dx.astype(np.float32)
-        ui = ui.astype(np.float32)
-        r = r.astype(np.float32)        
-
-        c_float_p = ctypes.POINTER(ctypes.c_float)
-        
-        if self._qp_c is None:
-            #self._qp_c = ctypes.CDLL('/home/marco/Downloads/tie/c/build/libcdmpc_py.so')
-            self._qp_c = ctypes.CDLL('C:/Users/mguerreiro/Desktop/tie/c/build/libcdmpc_py.dll')
-            self._qp_c.cdmpc_py_step.argtypes = (
-                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
-                )
-
-        du = np.zeros(ui.shape, dtype=np.float32)
-
-        n_iters = self._qp_c.cdmpc_py_step(
-            xm.ctypes.data_as(c_float_p), xm_1.ctypes.data_as(c_float_p),
-            r.ctypes.data_as(c_float_p), ui.ctypes.data_as(c_float_p),
-            du.ctypes.data_as(c_float_p))
-        
-        return du, n_iters
-    
 
     def sim(self, xi, ui, r, n, Bd=None, ud=None, solver='hild'):
         """Simulates closed-loop system with the predictive controller.
@@ -672,6 +644,8 @@ class System:
         # Updates last value of y
         y[n - 1] = Cm @ xm[n - 1]
 
+        n_iters[n - 1] = n_iter
+
         results = {}
         results['u'] = u
         results['xm'] = xm
@@ -724,10 +698,12 @@ class System:
         model.Rs_bar = self.Rs_bar
 
         model.M = self.M
-        model.Mx_aux = self.Mx_aux
 
-        model.Fx = self.Fx
-        model.Phi_x = self.Phi_x
+        if self.x_lim is not None:
+            model.Mx_aux = self.Mx_aux
+
+            model.Fx = self.Fx
+            model.Phi_x = self.Phi_x
 
         model.F = self.F
         model.Phi = self.Phi

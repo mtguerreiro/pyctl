@@ -518,7 +518,7 @@ class Hildreth:
         else:
             prefix = prefix + '_'
 
-        tab_size = len(prefix.upper() + 'DMPC_CONFIG_NLAMBDA')
+        tab_size = len(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER')
         tab = '{{:<{:}}}'.format(tab_size + 4)
         
         file = prefix + 'dmpc_defs'
@@ -576,11 +576,23 @@ class Hildreth:
         n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CTR', n_st_cnt)
         n_st_cnt_txt = '\n/* State constraints */\n'+\
                           '#define {:}\n'.format(n_st_cnt_def)
+        
+        hild_tol = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_TOL', 1e-6)
+        hild_n_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_N_ITER', 200)
+        hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', 0)
+        solver = '#define DMPC_CONFIG_SOLVER_{:}\n'.format('OSQP')
 
+        solver_txt = '\n/* Solver settings */\n' +\
+                     '#define {:}\n'.format(hild_tol)+\
+                     '#define {:}\n'.format(hild_n_iter)+\
+                     '#define {:}\n'.format(hild_fixed_iter)+\
+                     solver
+        
         defs_txt = header + def_guard_txt +\
                    scale_txt +\
                    n_states_txt + n_hor_txt + n_in_out_txt +\
                    n_size_u_txt + n_input_cnt_txt + n_st_cnt_txt +\
+                   solver_txt +\
                    guard_end_txt
         
         return defs_txt
@@ -634,33 +646,44 @@ class OSQP:
         
     def gen_osqp_matrices(self, scaling=1.0):
 
-        n_cnt = self.model.n_cnt
         nu = self.model.Bm.shape[1]
-        nx_cnt = self.model.x_lim.shape[1] if self.model.x_lim is not None else 0
         
-        bounds_size = round( self.model.M.shape[0] / 2 )
-        lin_cost_size = self.model.Ej.shape[0]
-
         P = self.model.Ej
         P = scipy.sparse.csc_matrix(P)
 
-        A = np.zeros([bounds_size, lin_cost_size])
-        A[:(nu * n_cnt), :] = self.model.M[ nu * n_cnt : 2 * (nu * n_cnt), : ]
-        A[(nu * n_cnt):, :] = self.model.M[ (2 * nu + nx_cnt) * n_cnt :, :]
-        A = scipy.sparse.csc_matrix(A)
-
-        l = np.zeros(bounds_size)
-        l[:(nu * n_cnt)] = self.model.u_lim[0, 0]
-        l[(nu * n_cnt):] = self.model.x_lim[0, 0]
-
-        u = np.zeros(bounds_size)
-        u[:(nu * n_cnt)] = self.model.u_lim[1, 0]
-        u[(nu * n_cnt):] = self.model.x_lim[1, 0]
-
         q = -self.model.Phi.T @ self.model.Rs_bar @ np.ones(nu) / 1000
+        
+        if (self.model.x_lim is None) and (self.model.u_lim is None):
+            A = np.eye(self.model.Ej.shape[0])
+            l = -np.inf * np.ones(A.shape[0])
+            u =  np.inf * np.ones(A.shape[0])
+            A = scipy.sparse.csc_matrix(A)
+        
+        else:
+            n_cnt = self.model.n_cnt
+            nx_cnt = self.model.x_lim.shape[1] if self.model.x_lim is not None else 0
+            
+            bounds_size = round( self.model.M.shape[0] / 2 )
+            lin_cost_size = self.model.Ej.shape[0]            
+            A = np.zeros([bounds_size, lin_cost_size])
+            A[:(nu * n_cnt), :] = self.model.M[ nu * n_cnt : 2 * (nu * n_cnt), : ]
+            A[(nu * n_cnt):, :] = self.model.M[ (2 * nu + nx_cnt) * n_cnt :, :]
+            A = scipy.sparse.csc_matrix(A)
+
+            l = np.zeros(bounds_size)
+            u = np.zeros(bounds_size)
+
+            if self.model.x_lim is not None:
+                l[(nu * n_cnt):] = self.model.x_lim[0, 0]
+                u[(nu * n_cnt):] = self.model.x_lim[1, 0]
+
+            if self.model.u_lim is not None:
+                l[:(nu * n_cnt)] = self.model.u_lim[0, 0]
+                u[:(nu * n_cnt)] = self.model.u_lim[1, 0]
 
         return (P, q, A, l, u)
-        
+
+
 def _export_np_array_to_c(arr, arr_name, fill=True):
 
     if arr.ndim == 1:
