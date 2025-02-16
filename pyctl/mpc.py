@@ -4,12 +4,6 @@ import scipy
 import pyctl
 import qpsolvers as qps
 
-import sys
-import ctypes
-
-import os
-from shutil import copytree, ignore_patterns
-
 
 def aug(Am, Bm, Cm):
     r"""Determines the augmented model.
@@ -371,9 +365,7 @@ class System:
 
         self.y_idx = np.array(y_idx)
         
-        #self.c_gen = pyctl.code_gen.c_gen()
-
-        self._qp_c = None
+        self.qp = pyctl.qp.QP(self.Ej, self.M, self.Hj, self.F, self.Phi)
 
     
     def gen_static_qp_matrices(self):
@@ -516,11 +508,8 @@ class System:
 
         nu = ui.shape[0]
 
-        if solver == 'hild_c':
-            du, n_iters = self.qp_c(xm, dx, xa, ui, r)
-        else:
-            Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
-            du, n_iters = self.qp(Fj, y, solver=solver)
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+        du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
 
         return (du[:nu], n_iters)
 
@@ -552,41 +541,6 @@ class System:
             du.ctypes.data_as(c_float_p))
         
         return du, n_iters
-
-        
-    def qp(self, Fj, y, solver='hild'):
-        r"""Solves the QP problem given by:
-
-        .. :math:
-
-            J = \Delta U^T E_J \Delta U^T +  \Delta U^T F_j,
-
-        subject to:
-
-        .. :math:
-
-            M \Delta U \leq y.
-            
-        """
-        Ej = self.Ej; Ej_inv = self.Ej_inv
-        M = self.M
-
-        if solver == 'hild':
-            F = self.F; Phi = self.Phi
-            
-            Hj = self.Hj
-            Kj = y + M @ Ej_inv @ Fj
-
-            lm, n_iters = pyctl.qp.hild(Hj, Kj, n_iter=250, ret_n_iter=True)
-            lm = lm.reshape(-1, 1)
-            du_opt = -Ej_inv @ (Fj + M.T @ lm)
-            du_opt = du_opt.reshape(-1)
-
-        else:
-            du_opt = qps.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1), solver=solver)
-            n_iters = 0
-
-        return (du_opt, n_iters)
     
 
     def sim(self, xi, ui, r, n, Bd=None, ud=None, solver='hild'):
@@ -727,7 +681,7 @@ class System:
         return results
 
     
-    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
+    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', gen_dll=False):
         
         model = self._get_code_gen_model()
         pyctl.code_gen.gen(
@@ -735,8 +689,11 @@ class System:
             file_path=file_path, prefix=prefix,
             scaling=scaling, Bd=Bd,
             ref=ref,
-            copy_cdmpc_src=False
         )
+
+        if gen_dll:
+            dll_path = pyctl.code_gen.gen_py_cdmpc_dll(file_path)
+            self.qp.set_dll(dll_path)
 
 
     def _get_code_gen_model(self):

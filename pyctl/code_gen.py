@@ -2,22 +2,56 @@ import numpy as np
 import scipy
 import scipy.signal
 
-import sys
-import os
-from shutil import copytree, ignore_patterns
+import pyctl
+import osqp
 
 from dataclasses import dataclass
 
-import osqp
+from shutil import copytree, ignore_patterns
+import sys, os
+import subprocess
+import platform
 
 
-def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
+def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
 
     _hild = Hildreth(model)
-    _hild.gen(file_path=file_path, prefix=prefix, scaling=scaling, Bd=Bd, ref=ref, copy_cdmpc_src=False)
+    _hild.gen(file_path=file_path, prefix=prefix, scaling=scaling, Bd=Bd, ref=ref)
 
     _osqp = OSQP(model)
     _osqp.gen(file_path=file_path, scaling=scaling)
+
+
+def gen_py_cdmpc_dll(source_path):
+
+    pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
+    cdmpc_py_dir = pyctl_root + r'/cdmpc_py/cdmpc/'
+    cdmpc_py_build_dir = pyctl_root + r'/cdmpc_py/build/'
+
+    plat = platform.system()
+    
+    if not os.path.exists(cdmpc_py_dir):
+        os.makedirs(cdmpc_py_dir)
+
+    if not os.path.exists(cdmpc_py_build_dir):
+        os.makedirs(cdmpc_py_build_dir)
+
+    copytree(source_path, cdmpc_py_dir, dirs_exist_ok=True)
+
+    plat = platform.system()
+
+    if plat == 'Linux':
+        subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
+    elif plat == 'Windows':
+        subprocess.run(['cmake', '..', '-G', 'MinGW Makefiles'], cwd=cdmpc_py_build_dir, check=True)
+    else:
+        raise ValueError('Platform not supported for code generation.')
+
+    subprocess.run(['make'], cwd=cdmpc_py_build_dir, check=True)
+
+    dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
+
+    return dll_path
 
 
 class Hildreth:
@@ -27,8 +61,16 @@ class Hildreth:
         self.model = model
 
 
-    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', copy_cdmpc_src=False):
-        
+    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
+
+        pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
+        cdmpc_path = pyctl_root + r'/cdmpc/'
+        copytree(
+            cdmpc_path, file_path,
+            dirs_exist_ok=True,
+            ignore=ignore_patterns('.git', '.gitignore')
+            )
+            
         if prefix is None:
             file_prefix = ''
         else:
@@ -40,10 +82,7 @@ class Hildreth:
         header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
         defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
 
-        if file_path is not None:
-            if copy_cdmpc_src is True:
-                self.copy_static_sources(path=file_path)
-                
+        if file_path is not None:                
             with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
                 efile.write(src_txt)
             with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:
@@ -648,13 +687,6 @@ def _export_np_array_to_c(arr, arr_name, fill=True):
         arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
         
     return arr_txt
-
-
-def _copy_cdmpc_static_sources(self, path=''):
-
-    src = os.path.dirname( os.path.dirname(pyctl.__file__) )
-    src = src + '/cdmpc/'
-    copytree(src, path, dirs_exist_ok=True)
 
     
 @dataclass
