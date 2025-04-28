@@ -40,7 +40,7 @@ class QP:
             
         """        
         if solver not in self.solvers:
-            raise ValueError(f'`solver` should be one of {solvers}.')
+            raise ValueError(f'`solver` should be one of {self.solvers}.')
 
         Ej = self.Ej; Ej_inv = self.Ej_inv
         M = self.M
