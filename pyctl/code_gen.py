@@ -42,14 +42,14 @@ def gen_py_cdmpc_dll(source_path):
 
     if plat == 'Linux':
         subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
+        dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
     elif plat == 'Windows':
         subprocess.run(['cmake', '..', '-G', 'MinGW Makefiles'], cwd=cdmpc_py_build_dir, check=True)
+        dll_path = cdmpc_py_build_dir + r'libcdmpc_py.dll'
     else:
         raise ValueError('Platform not supported for code generation.')
 
     subprocess.run(['make'], cwd=cdmpc_py_build_dir, check=True)
-
-    dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
 
     return dll_path
 
