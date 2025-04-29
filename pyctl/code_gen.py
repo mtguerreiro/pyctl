@@ -54,15 +54,28 @@ def gen_py_cdmpc_dll(source_path):
     return dll_path
 
 
+@dataclass
+class Hildreth_Solver_Settings:
+    tol : float = 1e-6
+    max_iter : int = 200
+    fixed_iter : bool = True
+
 class Hildreth:
 
-    def __init__(self, model):
+    def __init__(self, model, settings=None):
 
+        if settings is None:
+            settings = Hildreth_Solver_Settings()
+
+        self.settings = settings
         self.model = model
 
 
-    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
+    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', solver_settings=None):
 
+        if solver_settings is None:
+            solver_settings = self.settings
+        
         pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
         cdmpc_path = pyctl_root + r'/cdmpc/'
         copytree(
@@ -80,7 +93,7 @@ class Hildreth:
 
         src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
         header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
-        defs_txt = self._gen_defs(scaling=scaling, Bd=Bd, prefix=prefix)
+        defs_txt = self._gen_defs(solver_settings, scaling=scaling, Bd=Bd, prefix=prefix)
 
         if file_path is not None:                
             with open(file_path + file_prefix + 'dmpc_matrices.c', 'w') as efile:
@@ -136,7 +149,7 @@ class Hildreth:
         return txt
 
 
-    def _gen_defs(self, scaling=1.0, Bd=None, prefix=None):
+    def _gen_defs(self, solver_settings, scaling=1.0, Bd=None, prefix=None):
 
         x_lim = self.model.x_lim
         u_lim = self.model.u_lim
@@ -183,8 +196,9 @@ class Hildreth:
             n_xm, n_xa, ny, nu, nd,
             n_pred, n_ctl, n_cnt, n_lambda,
             n_in_cnt, n_st_cnt,
+            solver_settings,
             scaling=scaling,
-            prefix=prefix
+            prefix=prefix,
         )
 
         return defs
@@ -503,7 +517,7 @@ class Hildreth:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_cnt, scaling=1.0, prefix=None):
+    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -576,17 +590,22 @@ class Hildreth:
         n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CTR', n_st_cnt)
         n_st_cnt_txt = '\n/* State constraints */\n'+\
                           '#define {:}\n'.format(n_st_cnt_def)
-        
-        hild_tol = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_TOL', 1e-6)
-        hild_n_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_N_ITER', 200)
-        hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', 0)
-        solver = '#define DMPC_CONFIG_SOLVER_{:}\n'.format('OSQP')
+
+        hild_tol = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_TOL', solver_settings.tol)
+        hild_n_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_N_ITER', solver_settings.max_iter)
+        hfi = 1 if solver_settings.fixed_iter is True else 0
+        hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', hfi)
+
+        solver_guard = '\n#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)\n'\
+                       '#define DMPC_CONFIG_SOLVER_HILD\n'\
+                       '#endif\n'
+        #solver = '#define DMPC_CONFIG_SOLVER_{:}\n'.format('HILD')
 
         solver_txt = '\n/* Solver settings */\n' +\
                      '#define {:}\n'.format(hild_tol)+\
                      '#define {:}\n'.format(hild_n_iter)+\
                      '#define {:}\n'.format(hild_fixed_iter)+\
-                     solver
+                     solver_guard
         
         defs_txt = header + def_guard_txt +\
                    scale_txt +\
@@ -598,14 +617,32 @@ class Hildreth:
         return defs_txt
 
 
+@dataclass
+class OSQP_Solver_Settings:
+    scaled_termination : bool = False    
+    check_termination : int = 0
+    max_iter : int = 40
+    warm_start : bool = False
+    scaling : int = 100
+    adaptive_rho : bool = False
+    #eps_abs : float = 1e-5
+    #eps_rel : float = 1e-5
+
 class OSQP:
 
-    def __init__(self, model):
-        
+    def __init__(self, model, settings=None):
+
+        if settings is None:
+            settings = OSQP_Solver_Settings()
+
+        self.settings = settings
         self.model = model
 
 
-    def gen(self, file_path = '', scaling=1.0):
+    def gen(self, file_path = '', scaling=1.0, settings=None):
+
+        if not settings:
+            settings = self.settings
 
         (P, q, A, l, u) = self.gen_osqp_matrices(scaling=scaling)
 
@@ -613,13 +650,13 @@ class OSQP:
 
         prob.setup(
             P, q, A, l, u,
-            scaled_termination=False,
-            check_termination=0,
-            max_iter=40,
-            warm_start=False,
+            scaled_termination=settings.scaled_termination,
+            check_termination=settings.check_termination,
+            max_iter=settings.max_iter,
+            warm_start=settings.warm_start,
             #eps_abs=1e-5, eps_rel=1e-5,
-            scaling=100,
-            adaptive_rho=False
+            scaling=settings.scaling,
+            adaptive_rho=settings.adaptive_rho
         )
 
         osqp_src_gen = file_path + r'/osqp_code_gen'
