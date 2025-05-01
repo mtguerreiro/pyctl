@@ -5,7 +5,7 @@ import scipy.signal
 import pyctl
 import osqp
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from shutil import copytree, ignore_patterns
 import sys, os
@@ -13,12 +13,15 @@ import subprocess
 import platform
 
 
-def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant'):
+def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', solver_settings=None):
 
-    _hild = Hildreth(model)
+    if solver_settings is None:
+        solver_settings = Solver_Settings()
+    
+    _hild = Hildreth(model, settings=solver_settings.hild)
     _hild.gen(file_path=file_path, prefix=prefix, scaling=scaling, Bd=Bd, ref=ref)
 
-    _osqp = OSQP(model)
+    _osqp = OSQP(model, settings=solver_settings.osqp)
     _osqp.gen(file_path=file_path, scaling=scaling)
 
 
@@ -789,3 +792,9 @@ class CodeGenData:
 
     Kx : np.ndarray
     Ky : np.ndarray
+
+
+@dataclass
+class Solver_Settings:
+    hild : Hildreth_Solver_Settings = field(default_factory=Hildreth_Solver_Settings)
+    osqp : OSQP_Solver_Settings = field(default_factory=OSQP_Solver_Settings)
