@@ -62,6 +62,7 @@ class Hildreth_Solver_Settings:
     tol : float = 1e-6
     max_iter : int = 200
     fixed_iter : bool = True
+    normalize_h: bool = False
 
 class Hildreth:
 
@@ -94,7 +95,7 @@ class Hildreth:
 
         np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
 
-        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix)
+        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
         header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
         defs_txt = self._gen_defs(solver_settings, scaling=scaling, Bd=Bd, prefix=prefix)
 
@@ -109,14 +110,14 @@ class Hildreth:
         np.set_printoptions(floatmode='fixed', threshold=1000)
         
         
-    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None):
+    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None, normalize=False):
 
         u_lim = self.model.u_lim
         x_lim = self.model.x_lim
         
         # Matrices for Hildreth's QP procedure
         if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref)
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
         
         header = self.header(ftype=ftype, prefix=prefix)
 
@@ -207,7 +208,7 @@ class Hildreth:
         return defs
 
 
-    def hild_matrices(self, ref='constant'):
+    def hild_matrices(self, ref='constant', normalize=False):
 
         Ej_inv = np.linalg.inv(self.model.Ej)
         
@@ -229,9 +230,16 @@ class Hildreth:
         else:
             Fx = self.model.Mx_aux @ self.model.Fx
 
-        Hj = np.zeros(self.model.Hj.shape, dtype=self.model.Hj.dtype)
-        Hj[:] = self.model.Hj[:]
-        Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+        if normalize == True:
+            Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
+            Hj[:] = self.Hj[:]
+            Hj_aux = Hj.copy()
+            np.fill_diagonal(Hj_aux, 1)
+            Hj = np.linalg.inv(-np.diag(np.diag(Hj))) @ Hj_aux
+        else:
+            Hj = np.zeros(self.model.Hj.shape, dtype=self.model.Hj.dtype)
+            Hj[:] = self.model.Hj[:]
+            Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
 
         DU1 = (-Ej_inv)[:m, :]
         DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
