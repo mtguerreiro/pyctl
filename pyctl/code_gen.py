@@ -569,8 +569,8 @@ class Hildreth:
                        '#define {:}\n'.format(n_xa_def)
 
         n_pred_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NP', n_pred)
-        n_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NC', n_ctl)
-        n_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NR', n_cnt)
+        n_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NCTL', n_ctl)
+        n_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NCNT', n_cnt)
         n_lambda_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NLAMBDA', n_lambda)
 
         n_hor_txt = '\n/* Prediction, control and constraint horizon */\n'+\
@@ -588,17 +588,17 @@ class Hildreth:
                        '#define {:}\n'.format(n_out_def)+\
                        '#define {:}\n'.format(n_dist_def)
 
-        n_ctl_def = prefix.upper() + 'DMPC_CONFIG_NC'
+        n_ctl_def = prefix.upper() + 'DMPC_CONFIG_NCNT'
         nu_def = prefix.upper() + 'DMPC_CONFIG_NU'
-        size_u = tab.format(prefix.upper() + 'DMPC_CONFIG_NC_x_NU') + '({:} * {:})'.format(n_ctl_def, nu_def)
+        size_u = tab.format(prefix.upper() + 'DMPC_CONFIG_U_SIZE') + '({:} * {:})'.format(n_ctl_def, nu_def)
         n_size_u_txt = '\n/* Size of control vector */\n'+\
                        '#define {:}\n'.format(size_u)
 
-        n_input_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NU_CTR', nu_cnt)
+        n_input_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NU_CNT', nu_cnt)
         n_input_cnt_txt = '\n/* Input constraints */\n'+\
                           '#define {:}\n'.format(n_input_cnt_def)
 
-        n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CTR', n_st_cnt)
+        n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CNT', n_st_cnt)
         n_st_cnt_txt = '\n/* State constraints */\n'+\
                           '#define {:}\n'.format(n_st_cnt_def)
 
