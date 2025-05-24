@@ -31,9 +31,9 @@ t_sim = 10e-3
 
 # Optimization parameters
 rw = [2e-5, 2e-5]
-n_pred = 4
-n_ctl = 4
-n_cnt = 4
+l_pred = 4
+l_ctl = 4
+l_cnt = 4
 
 # Constraints
 k = 0.875
@@ -72,7 +72,12 @@ Bv = Bd[:, 2:]
 n = int(t_sim / dt)
 
 # --- System ---
-sys = ctl.mpc.System(Ad, Bu, Cd, n_pred=n_pred, n_ctl=n_ctl, n_cnt=n_cnt, rw=rw, x_lim=x_lim, u_lim=u_lim)
+sys = ctl.mpc.System(
+    Ad, Bu, Cd,
+    l_pred=l_pred, l_ctl=l_ctl, l_u_cnt=l_cnt, l_x_cnt=l_cnt,
+    rw=rw,
+    x_lim=x_lim, u_lim=u_lim
+)
 
 # --- Sim with receding horizon ---
 # Reference - grid-side currents

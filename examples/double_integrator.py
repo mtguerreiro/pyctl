@@ -26,8 +26,8 @@ dt = 0.1
 
 # Optimization parameters
 rw = 0.025
-n_pred = 10
-n_ctl = 4
+l_pred = 10
+l_ctl = 4
 
 # Reference
 r = 5
@@ -38,7 +38,7 @@ n = 50
 # --- System ---
 Ad, Bd, Cd, _, _ = scipy.signal.cont2discrete((Am, Bm, Cm, 0), dt, method='zoh')
 
-sys = ctl.mpc.System(Ad, Bd, Cd, n_pred=n_pred, n_ctl=n_ctl, rw=rw, u_lim=u_lim, x_lim=x_lim)
+sys = ctl.mpc.System(Ad, Bd, Cd, l_pred=l_pred, l_ctl=l_ctl, rw=rw, u_lim=u_lim, x_lim=x_lim)
 
 # --- Sim with receding horizon ---
 data = sys.sim(xi, ui, r, n)
