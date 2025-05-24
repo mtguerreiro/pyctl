@@ -264,11 +264,16 @@ class System:
         remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
         assumed.
 
-    n_cnt : :class:`NoneType`, :class:`int`
-        Lenght of the prediction horizon where the constraints are enforced.
-        Note that `n_cnt` is less than or equal to `n_ctl`. If set to `None`,
-        `n_cnt = n_ctl` is assumed.
-    
+    n_u_cnt : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints on the input
+        are enforced. Note that `n_u_cnt` is less than or equal to `n_ctl`.
+        If set to `None`, `n_u_cnt = n_ctl` is assumed.
+
+    n_x_cnt : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints on the states
+        are enforced. Note that `n_x_cnt` is less than or equal to `n_ctl`.
+        If set to `None`, `n_x_cnt = n_ctl` is assumed.
+        
     rw : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weighting factor for the control inputs. If set to `None`, `rw` is set
         to zero.
@@ -285,7 +290,11 @@ class System:
         constraints and set on the input signals.
 
     """
-    def __init__(self, Am, Bm, Cm, n_pred, n_ctl=None, n_cnt=None, rw=None, q=None, x_lim=None, u_lim=None):
+    def __init__(self,
+             Am, Bm, Cm,
+             n_pred, n_ctl=None, n_u_cnt=None, n_x_cnt=None,
+             rw=None, q=None,
+             x_lim=None, u_lim=None):
 
         # System model and augmented model
         self.Am = Am; self.Bm = Bm; self.Cm = Cm
@@ -302,11 +311,16 @@ class System:
             self.n_ctl = n_ctl
 
         # Constraints horizon
-        if n_cnt is None:
-            self.n_cnt = self.n_ctl
+        if n_u_cnt is None:
+            self.n_u_cnt = self.n_ctl
         else:
-            self.n_cnt = n_cnt
+            self.n_u_cnt = n_u_cnt
 
+        if n_x_cnt is None:
+            self.n_x_cnt = self.n_ctl
+        else:
+            self.n_x_cnt = n_x_cnt
+            
         # Weighting factor
         if Bm.ndim == 1:
             nu = 1
@@ -372,7 +386,8 @@ class System:
         """
         A = self.A; B = self.B; C = self.C
         Am = self.Am; Bm = self.Bm; Cm = self.Cm
-        n_pred = self.n_pred; n_ctl = self.n_ctl; n_cnt = self.n_cnt
+        n_pred = self.n_pred; n_ctl = self.n_ctl;
+        n_u_cnt = self.n_u_cnt; n_x_cnt = self.n_x_cnt
         rw = self.rw
 
         x_lim = self.x_lim
@@ -400,7 +415,7 @@ class System:
         # control inequality constraints
         M = None
         if u_lim is not None:
-            M_aux = np.tril( np.tile( np.eye(m), (n_cnt, n_ctl) ) )
+            M_aux = np.tril( np.tile( np.eye(m), (n_u_cnt, n_ctl) ) )
             Mu = np.concatenate((-M_aux, M_aux))
             M = Mu
 
@@ -432,14 +447,14 @@ class System:
                     else:
                         Cx = np.concatenate((Cx, cx))
                         
-            Fx, Phi_x = opt_matrices(Am, Bm, Cx, n_cnt, n_ctl)
+            Fx, Phi_x = opt_matrices(Am, Bm, Cx, n_x_cnt, n_ctl)
             self.Fx = Fx; self.Phi_x = Phi_x
             self.Cx = Cx
             
             self.x_lim = np.array(x_lim_new)
             self.x_lim_idx = np.array(x_lim_idx)
 
-            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_cnt, n_cnt) ) )
+            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_x_cnt, n_x_cnt) ) )
             self.Mx_aux = M_aux
             Mx = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
@@ -469,7 +484,7 @@ class System:
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
-        n_cnt = self.n_cnt
+        n_u_cnt = self.n_u_cnt; n_x_cnt = self.n_x_cnt
         F = self.F; Phi = self.Phi
         Rs_bar = self.Rs_bar
        
@@ -483,8 +498,8 @@ class System:
         y = None
         
         if u_lim is not None:
-            u_min = np.tile(-u_lim[0] + ui, n_cnt).reshape(-1, 1)
-            u_max = np.tile( u_lim[1] - ui, n_cnt).reshape(-1, 1)
+            u_min = np.tile(-u_lim[0] + ui, n_u_cnt).reshape(-1, 1)
+            u_max = np.tile( u_lim[1] - ui, n_u_cnt).reshape(-1, 1)
 
             y = np.concatenate((u_min, u_max))
 
@@ -494,8 +509,8 @@ class System:
             Cx = self.Cx
             Fx = self.Fx
             M_Fx = Mx_aux @ Fx
-            x_min = np.tile(-x_lim[0] + Cx @ xm, n_cnt).reshape(-1, 1) + M_Fx @ dx.reshape(-1, 1)
-            x_max = np.tile( x_lim[1] - Cx @ xm, n_cnt).reshape(-1, 1) - M_Fx @ dx.reshape(-1, 1)
+            x_min = np.tile(-x_lim[0] + Cx @ xm, n_x_cnt).reshape(-1, 1) + M_Fx @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - Cx @ xm, n_x_cnt).reshape(-1, 1) - M_Fx @ dx.reshape(-1, 1)
 
             if y is None:
                 y = np.concatenate((x_min, x_max))
@@ -685,7 +700,8 @@ class System:
 
         model.n_pred = self.n_pred
         model.n_ctl = self.n_ctl
-        model.n_cnt = self.n_cnt
+        model.n_u_cnt = self.n_u_cnt
+        model.n_x_cnt = self.n_x_cnt
         
         model.u_lim = self.u_lim
         model.u_lim_idx = self.u_lim_idx
