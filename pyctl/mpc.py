@@ -55,7 +55,7 @@ def aug(Am, Bm, Cm):
     return (A, B, C)
 
 
-def opt_matrices(A, B, C, n_p, n_c):
+def opt_matrices(A, B, C, lp, lc):
     r"""Computes the :math:`F` and :math:`Phi` matrices.
 
     Parameters
@@ -69,10 +69,10 @@ def opt_matrices(A, B, C, n_p, n_c):
     C : :class:`np.array`
         The `B` matrix of the augmented model. An (q, n) numpy matrix.
 
-    n_p : :class:`int`
+    lp : :class:`int`
         Length of prediction horizon.
 
-    n_c : :class:`int`
+    lc : :class:`int`
         Length of the control window.
 
     Returns
@@ -97,23 +97,23 @@ def opt_matrices(A, B, C, n_p, n_c):
     else:
         q = C.shape[0]
     
-    F = np.zeros((n_p * q, A.shape[1]))
+    F = np.zeros((lp * q, A.shape[1]))
     F[:q, :] = C @ A
-    for i in range(1, n_p):
+    for i in range(1, lp):
         F[q * i : q * (i + 1), :] = F[q * (i - 1) : q * i, :] @ A
 
-    Phi = np.zeros((n_p * q, n_c * m))
+    Phi = np.zeros((lp * q, lc * m))
     Phi[:q, :m] = C @ B
-    for i in range(1, n_p):
+    for i in range(1, lp):
         A_p = np.linalg.matrix_power(A, i)
         Phi[ (q * i) : ( q * (i + 1) ), :m] = C @ A_p @ B
-        for j in range(n_c - 1):
+        for j in range(lc - 1):
             Phi[ (q * i) : ( q * (i + 1) ), m * (j + 1) : m * (j + 2)] = Phi[ ( q * (i - 1) ) : (q * i), m * j : m * (j + 1)]
 
     return (F, Phi)
 
 
-def control_weighting_matrix(r_w, n_c):
+def control_weighting_matrix(r_w, lc):
     r"""Computes the :math:`\bar{R}` matrix.
 
     Parameters
@@ -122,13 +122,13 @@ def control_weighting_matrix(r_w, n_c):
         The weighting coefficients, as a 1-d numpy array, an integer or a
         list.
 
-    n_c : :class:`int`
+    lc : :class:`int`
         Length of the control window.
 
     Returns
     -------
     R_bar : :class:`np.array`
-        An (n_c * m, n_c * m) matrix, where `m` is the number of coefficients
+        An (lc * m, lc * m) matrix, where `m` is the number of coefficients
         (system input signals).
     
     """
@@ -139,14 +139,14 @@ def control_weighting_matrix(r_w, n_c):
 
     m = r_w.shape[0]
     
-    R_bar = np.zeros((n_c * m, n_c * m))
-    for i in range(n_c):
+    R_bar = np.zeros((lc * m, lc * m))
+    for i in range(lc):
         R_bar[m * i : m * (i + 1), m * i : m * (i + 1)] = np.diag(r_w)
 
     return R_bar
 
 
-def reference_matrix(q, n_p):
+def reference_matrix(q, lp):
     r"""Computes the :math:`\bar{R_s}` matrix.
 
     Parameters
@@ -154,22 +154,22 @@ def reference_matrix(q, n_p):
     q : :class:`int`
         Number of references (system outputs).
         
-    n_p : :class:`int`
+    lp : :class:`int`
         Length of prediction horizon.
 
     Returns
     -------
     R_s_bar : :class:`np.array`
-        An (q, n_p * q) matrix, where `q` is the number of references
+        An (q, lp * q) matrix, where `q` is the number of references
         (system outputs).
     
     """
-    R_s_bar = np.tile(np.eye(q), (n_p, 1))
+    R_s_bar = np.tile(np.eye(q), (lp, 1))
 
     return R_s_bar
 
 
-def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
+def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -184,20 +184,20 @@ def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
     C : :class:`np.array`
         :math:`C_m` matrix. A (q, n) numpy matrix.
 
-    n_pred : :class:`int`
+    l_pred : :class:`int`
         Length of prediction horizon.
 
-    n_ctl : :class:`NoneType`, :class:`int`
+    l_ctl : :class:`NoneType`, :class:`int`
         Length of the prediction horizon where the control input increments
-        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
-        `n_ctl` less than `n_pred`, the increments are set zero to for the
-        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
+        can be set. Note that `l_ctl` is less than or equal to `l_pred`. For
+        `l_ctl` less than `l_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
         assumed.
 
     n_ctn : :class:`NoneType`, :class:`int`
         Lenght of the prediction horizon where the constraints are enforced.
-        Note that `n_ctn` is less than or equal to `n_ctl`. If set to `None`,
-        `n_ctn = n_ctl` is assumed.
+        Note that `n_ctn` is less than or equal to `l_ctl`. If set to `None`,
+        `n_ctn = l_ctl` is assumed.
     
     rw : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weighting factor for the control inputs.If set to `None`, `rw` is set
@@ -225,11 +225,11 @@ def opt_unc_gains(A, B, C, n_pred, n_ctl, rw):
     else:
         q = C.shape[0]
 
-    Rs_bar = reference_matrix(q, n_pred)
+    Rs_bar = reference_matrix(q, l_pred)
 
-    R = control_weighting_matrix(rw, n_ctl)
+    R = control_weighting_matrix(rw, l_ctl)
 
-    F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
+    F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
     Phi_t = Phi.T
     
     K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
@@ -254,25 +254,25 @@ class System:
     Cm : :class:`np.array`
         Model matrix :math:`C_m`. An (q, n) numpy matrix.
 
-    n_pred : :class:`int`
+    l_pred : :class:`int`
         Length of prediction horizon.
 
-    n_ctl : :class:`NoneType`, :class:`int`
+    l_ctl : :class:`NoneType`, :class:`int`
         Length of the prediction horizon where the control input increments
-        can be set. Note that `n_ctl` is less than or equal to `n_pred`. For
-        `n_ctl` less than `n_pred`, the increments are set zero to for the
-        remaining prediction steps. If set to `None`, `n_ctl = n_pred` is
+        can be set. Note that `l_ctl` is less than or equal to `l_pred`. For
+        `l_ctl` less than `l_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
         assumed.
 
-    n_u_cnt : :class:`NoneType`, :class:`int`
+    l_u_cnt : :class:`NoneType`, :class:`int`
         Lenght of the prediction horizon where the constraints on the input
-        are enforced. Note that `n_u_cnt` is less than or equal to `n_ctl`.
-        If set to `None`, `n_u_cnt = n_ctl` is assumed.
+        are enforced. Note that `l_u_cnt` is less than or equal to `l_ctl`.
+        If set to `None`, `l_u_cnt = l_ctl` is assumed.
 
-    n_x_cnt : :class:`NoneType`, :class:`int`
+    l_x_cnt : :class:`NoneType`, :class:`int`
         Lenght of the prediction horizon where the constraints on the states
-        are enforced. Note that `n_x_cnt` is less than or equal to `n_ctl`.
-        If set to `None`, `n_x_cnt = n_ctl` is assumed.
+        are enforced. Note that `l_x_cnt` is less than or equal to `l_ctl`.
+        If set to `None`, `l_x_cnt = l_ctl` is assumed.
         
     rw : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weighting factor for the control inputs. If set to `None`, `rw` is set
@@ -292,7 +292,7 @@ class System:
     """
     def __init__(self,
              Am, Bm, Cm,
-             n_pred, n_ctl=None, n_u_cnt=None, n_x_cnt=None,
+             l_pred, l_ctl=None, l_u_cnt=None, l_x_cnt=None,
              rw=None, q=None,
              x_lim=None, u_lim=None):
 
@@ -302,24 +302,24 @@ class System:
         self.A, self.B, self.C = aug(Am, Bm, Cm)
 
         # Prediction horizon
-        self.n_pred = n_pred
+        self.l_pred = l_pred
 
         # Control horizon
-        if n_ctl is None:
-            self.n_ctl = n_pred
+        if l_ctl is None:
+            self.l_ctl = l_pred
         else:
-            self.n_ctl = n_ctl
+            self.l_ctl = l_ctl
 
         # Constraints horizon
-        if n_u_cnt is None:
-            self.n_u_cnt = self.n_ctl
+        if l_u_cnt is None:
+            self.l_u_cnt = self.l_ctl
         else:
-            self.n_u_cnt = n_u_cnt
+            self.l_u_cnt = l_u_cnt
 
-        if n_x_cnt is None:
-            self.n_x_cnt = self.n_ctl
+        if l_x_cnt is None:
+            self.l_x_cnt = self.l_ctl
         else:
-            self.n_x_cnt = n_x_cnt
+            self.l_x_cnt = l_x_cnt
             
         # Weighting factor
         if Bm.ndim == 1:
@@ -354,7 +354,7 @@ class System:
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
         Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-                                  self.n_pred, self.n_ctl, self.rw)
+                                  self.l_pred, self.l_ctl, self.rw)
         Kx = K_mpc[:, :n_xm]
 
         self.Ky = Ky
@@ -386,8 +386,8 @@ class System:
         """
         A = self.A; B = self.B; C = self.C
         Am = self.Am; Bm = self.Bm; Cm = self.Cm
-        n_pred = self.n_pred; n_ctl = self.n_ctl;
-        n_u_cnt = self.n_u_cnt; n_x_cnt = self.n_x_cnt
+        l_pred = self.l_pred; l_ctl = self.l_ctl;
+        l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         rw = self.rw
 
         x_lim = self.x_lim
@@ -405,8 +405,8 @@ class System:
         else:
             q = C.shape[0]
         
-        R_bar = control_weighting_matrix(rw, n_ctl)
-        Rs_bar = reference_matrix(q, n_pred)
+        R_bar = control_weighting_matrix(rw, l_ctl)
+        Rs_bar = reference_matrix(q, l_pred)
 
         self.R_bar = R_bar
         self.Rs_bar = Rs_bar
@@ -415,7 +415,7 @@ class System:
         # control inequality constraints
         M = None
         if u_lim is not None:
-            M_aux = np.tril( np.tile( np.eye(m), (n_u_cnt, n_ctl) ) )
+            M_aux = np.tril( np.tile( np.eye(m), (l_u_cnt, l_ctl) ) )
             Mu = np.concatenate((-M_aux, M_aux))
             M = Mu
 
@@ -447,14 +447,14 @@ class System:
                     else:
                         Cx = np.concatenate((Cx, cx))
                         
-            Fx, Phi_x = opt_matrices(Am, Bm, Cx, n_x_cnt, n_ctl)
+            Fx, Phi_x = opt_matrices(Am, Bm, Cx, l_x_cnt, l_ctl)
             self.Fx = Fx; self.Phi_x = Phi_x
             self.Cx = Cx
             
             self.x_lim = np.array(x_lim_new)
             self.x_lim_idx = np.array(x_lim_idx)
 
-            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (n_x_cnt, n_x_cnt) ) )
+            M_aux = np.tril( np.tile( np.eye(self.x_lim.shape[1]), (l_x_cnt, l_x_cnt) ) )
             self.Mx_aux = M_aux
             Mx = np.concatenate((-M_aux @ Phi_x, M_aux @ Phi_x))
 
@@ -466,7 +466,7 @@ class System:
         self.M = M
 
         # QP matrices
-        F, Phi = opt_matrices(A, B, C, n_pred, n_ctl)
+        F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
         self.F = F; self.Phi = Phi
 
         Ej = Phi.T @ Phi + R_bar
@@ -484,7 +484,7 @@ class System:
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
-        n_u_cnt = self.n_u_cnt; n_x_cnt = self.n_x_cnt
+        l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         F = self.F; Phi = self.Phi
         Rs_bar = self.Rs_bar
        
@@ -498,8 +498,8 @@ class System:
         y = None
         
         if u_lim is not None:
-            u_min = np.tile(-u_lim[0] + ui, n_u_cnt).reshape(-1, 1)
-            u_max = np.tile( u_lim[1] - ui, n_u_cnt).reshape(-1, 1)
+            u_min = np.tile(-u_lim[0] + ui, l_u_cnt).reshape(-1, 1)
+            u_max = np.tile( u_lim[1] - ui, l_u_cnt).reshape(-1, 1)
 
             y = np.concatenate((u_min, u_max))
 
@@ -509,8 +509,8 @@ class System:
             Cx = self.Cx
             Fx = self.Fx
             M_Fx = Mx_aux @ Fx
-            x_min = np.tile(-x_lim[0] + Cx @ xm, n_x_cnt).reshape(-1, 1) + M_Fx @ dx.reshape(-1, 1)
-            x_max = np.tile( x_lim[1] - Cx @ xm, n_x_cnt).reshape(-1, 1) - M_Fx @ dx.reshape(-1, 1)
+            x_min = np.tile(-x_lim[0] + Cx @ xm, l_x_cnt).reshape(-1, 1) + M_Fx @ dx.reshape(-1, 1)
+            x_max = np.tile( x_lim[1] - Cx @ xm, l_x_cnt).reshape(-1, 1) - M_Fx @ dx.reshape(-1, 1)
 
             if y is None:
                 y = np.concatenate((x_min, x_max))
@@ -698,10 +698,10 @@ class System:
         model.Bm = self.Bm
         model.Cm = self.Cm
 
-        model.n_pred = self.n_pred
-        model.n_ctl = self.n_ctl
-        model.n_u_cnt = self.n_u_cnt
-        model.n_x_cnt = self.n_x_cnt
+        model.l_pred = self.l_pred
+        model.l_ctl = self.l_ctl
+        model.l_u_cnt = self.l_u_cnt
+        model.l_x_cnt = self.l_x_cnt
         
         model.u_lim = self.u_lim
         model.u_lim_idx = self.u_lim_idx

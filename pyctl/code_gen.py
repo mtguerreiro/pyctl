@@ -160,14 +160,16 @@ class Hildreth:
         
         n_xm = self.model.Am.shape[0]
         n_xa = self.model.A.shape[0]
-        n_pred = self.model.n_pred
-        n_ctl = self.model.n_ctl
+        l_pred = self.model.l_pred
+        l_ctl = self.model.l_ctl
 
         if (x_lim is not None) or (u_lim is not None):
-            n_cnt = self.model.n_cnt
+            l_u_cnt = self.model.l_u_cnt
+            l_x_cnt = self.model.l_x_cnt
             n_lambda = self.model.M.shape[0]
         else:
-            n_cnt = 0
+            l_u_cnt = 0
+            l_x_cnt = 0
             n_lambda = 0
 
         if self.model.Cm.ndim == 1:
@@ -198,7 +200,7 @@ class Hildreth:
         
         defs = self.defs_header(
             n_xm, n_xa, ny, nu, nd,
-            n_pred, n_ctl, n_cnt, n_lambda,
+            l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
             n_in_cnt, n_st_cnt,
             solver_settings,
             scaling=scaling,
@@ -528,7 +530,7 @@ class Hildreth:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, n_pred, n_ctl, n_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
+    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -568,15 +570,17 @@ class Hildreth:
                        '#define {:}\n'.format(n_xm_def)+\
                        '#define {:}\n'.format(n_xa_def)
 
-        n_pred_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NP', n_pred)
-        n_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NCTL', n_ctl)
-        n_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NCNT', n_cnt)
+        l_pred_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_PRED', l_pred)
+        l_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_CTL', l_ctl)
+        l_u_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_U_CNT', l_u_cnt)
+        l_x_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_X_CNT', l_x_cnt)
         n_lambda_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NLAMBDA', n_lambda)
 
-        n_hor_txt = '\n/* Prediction, control and constraint horizon */\n'+\
-                    '#define {:}\n'.format(n_pred_def)+\
-                    '#define {:}\n'.format(n_ctl_def)+\
-                    '#define {:}\n'.format(n_cnt_def)+\
+        n_hor_txt = '\n/* Length of prediction, control and constraint horizons */\n'+\
+                    '#define {:}\n'.format(l_pred_def)+\
+                    '#define {:}\n'.format(l_ctl_def)+\
+                    '#define {:}\n'.format(l_u_cnt_def)+\
+                    '#define {:}\n'.format(l_x_cnt_def)+\
                     '#define {:}\n'.format(n_lambda_def)
 
 
@@ -588,9 +592,9 @@ class Hildreth:
                        '#define {:}\n'.format(n_out_def)+\
                        '#define {:}\n'.format(n_dist_def)
 
-        n_ctl_def = prefix.upper() + 'DMPC_CONFIG_NCNT'
+        l_ctl_def = prefix.upper() + 'DMPC_CONFIG_L_CTL'
         nu_def = prefix.upper() + 'DMPC_CONFIG_NU'
-        size_u = tab.format(prefix.upper() + 'DMPC_CONFIG_U_SIZE') + '({:} * {:})'.format(n_ctl_def, nu_def)
+        size_u = tab.format(prefix.upper() + 'DMPC_CONFIG_U_SIZE') + '({:} * {:})'.format(l_ctl_def, nu_def)
         n_size_u_txt = '\n/* Size of control vector */\n'+\
                        '#define {:}\n'.format(size_u)
 
@@ -610,7 +614,6 @@ class Hildreth:
         solver_guard = '\n#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)\n'\
                        '#define DMPC_CONFIG_SOLVER_HILD\n'\
                        '#endif\n'
-        #solver = '#define DMPC_CONFIG_SOLVER_{:}\n'.format('HILD')
 
         solver_txt = '\n/* Solver settings */\n' +\
                      '#define {:}\n'.format(hild_tol)+\
@@ -708,26 +711,27 @@ class OSQP:
             A = scipy.sparse.csc_matrix(A)
         
         else:
-            n_cnt = self.model.n_cnt
+            l_u_cnt = self.model.l_u_cnt
+            l_x_cnt = self.model.l_x_cnt
             nx_cnt = self.model.x_lim.shape[1] if self.model.x_lim is not None else 0
             
             bounds_size = round( self.model.M.shape[0] / 2 )
             lin_cost_size = self.model.Ej.shape[0]            
             A = np.zeros([bounds_size, lin_cost_size])
-            A[:(nu * n_cnt), :] = self.model.M[ nu * n_cnt : 2 * (nu * n_cnt), : ]
-            A[(nu * n_cnt):, :] = self.model.M[ (2 * nu + nx_cnt) * n_cnt :, :]
+            A[:(nu * l_u_cnt), :] = self.model.M[ nu * l_u_cnt : 2 * (nu * l_u_cnt), : ]
+            A[(nu * l_u_cnt):, :] = self.model.M[ (2 * nu * l_u_cnt + nx_cnt * l_x_cnt):, : ]
             A = scipy.sparse.csc_matrix(A)
 
             l = np.zeros(bounds_size)
             u = np.zeros(bounds_size)
 
             if self.model.x_lim is not None:
-                l[(nu * n_cnt):] = self.model.x_lim[0, 0]
-                u[(nu * n_cnt):] = self.model.x_lim[1, 0]
+                l[(nu * l_x_cnt):] = self.model.x_lim[0, 0]
+                u[(nu * l_x_cnt):] = self.model.x_lim[1, 0]
 
             if self.model.u_lim is not None:
-                l[:(nu * n_cnt)] = self.model.u_lim[0, 0]
-                u[:(nu * n_cnt)] = self.model.u_lim[1, 0]
+                l[:(nu * l_u_cnt)] = self.model.u_lim[0, 0]
+                u[:(nu * l_u_cnt)] = self.model.u_lim[1, 0]
 
         return (P, q, A, l, u)
 
@@ -771,9 +775,10 @@ class CodeGenData:
     B : np.ndarray
     C : np.ndarray
     
-    n_pred : int
-    n_ctl : int
-    n_cnt : int
+    l_pred : int
+    l_ctl : int
+    l_u_cnt : int
+    l_x_cnt : int
 
     u_lim = np.ndarray
     u_lim_idx = np.ndarray
