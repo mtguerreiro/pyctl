@@ -2,7 +2,6 @@ import pyctl as ctl
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
-
 plt.ion()
 
 # --- Model ---
@@ -13,8 +12,8 @@ C = 20e-6
 wg = 2 * np.pi * 50
 
 # Init conditions
-xi = 0
-ui = 0
+x0 = 0
+u0 = 0
 
 # Grid voltage
 ug = [162.5, 0.0]
@@ -86,7 +85,7 @@ r = np.zeros((n, 2))
 r[:int(n/2), :] = r1
 r[int(n/2):, :] = r2
 
-data = sys.sim(xi, ui, r, n, Bd=Bv, ud=ug, solver='hild')
+data = sys.sim(x0, u0, r, n, Bd=Bv, ud=ug, solver='hild')
 
 # --- Plots ---
 ud_lim_l = -ud_lim * np.ones(n)

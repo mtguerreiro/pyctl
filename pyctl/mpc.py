@@ -287,7 +287,8 @@ class System:
         
     u_lim : :class:`NoneType`, :class:`np.array`, :class:`list`
         Lower and upper bounds of the control signals. If set to`None`, no
-        constraints and set on the input signals.
+        constraints and set on the input signals. At the moment, constraints
+        can set either on all inputs or none of them.
 
     """
     def __init__(self,
@@ -530,32 +531,34 @@ class System:
         return (du[:nu], n_iters)
 
 
-    def sim(self, xi, ui, r, n, Bd=None, ud=None, solver='hild'):
+    def sim(self, x0, u0, r, n, Bd=None, ud=None, solver='hild'):
         """Simulates closed-loop system with the predictive controller.
 
         Parameters
         ----------
-        xi : :class:`int`, :class:`float`, :class:`list`, :class:`np.array`
+        x0 : :class:`int`, :class:`float`, :class:`list`, :class:`np.array`
             Initial state conditions. Can be passed as a single value, list
             or array, where each element corresponds the initial condition
-            of each state. If there are multiple states, and `xi` is a
+            of each state. If there are multiple states, and `x0` is a
             single element, or a list with a single element, the initial
-            value of all states is set to `xi`.
+            value of all states is set to `x0`.
 
-        ui : :class:`np.array`
+        u0 : :class:`np.array`
             Initial conditions for the control inputs. Can be passed as a
             single value, list or array, where each element corresponds the
             initial value of each input. If there are multiple states, and
-            `xi` is a single element, or a list with a single element, the
-            initial value of all states is set to `xi`.
+            `u0` is a single element, or a list with a single element, the
+            initial value of all states is set to `u0`.
 
         r : :class:`float`, :class:`np.array`
-            The set-point. If a single value, it is assumed constant for the
+            The setpoint. If a single value, it is assumed constant for the
             whole simulation. If a vector, each row is used at each step of
             the simulation.
 
         n : :class:`int`
-            Number of points for the simulation.
+            Number of points for the simulation. The system is simulated for
+            `n - 1` points, since the initial condition is assumed to be one
+            simulation point as well.
 
         Bd : :class:`np.array`
             An (p, p) numpy matrix, where `p` is the number of disturbances.
@@ -569,29 +572,29 @@ class System:
             simulation. By default, it is `None`.
 
         solver : :class:`str`
-            Solver to use for constrained problems. Supported options are
-            `hild`, `quadprog`, and `cvx`.
+            Solver to use for constrained problems. See `System.qp.solvers` for
+            a list of available solvers on your system.
             
         Returns
         -------
         data : :class:`dict`
             A dictionary containing the simulation results. The key `u`
-            contains the control actions, the key `x_m` contains the states
+            contains the control actions, the key `xm` contains the states
             and the key `y` contains the output.
 
         """
         Am = self.Am; Bm = self.Bm; Cm = self.Cm
         A = self.A; B = self.B; C = self.C
 
-        if type(xi) is int or type(xi) is float or type(xi) is list:
-            xi = np.array(xi).reshape(-1)
-        elif type(xi) is np.ndarray:
-            xi = np.array(xi).reshape(-1)
+        if type(x0) is int or type(x0) is float or type(x0) is list:
+            x0 = np.array(x0).reshape(-1)
+        elif type(x0) is np.ndarray:
+            x0 = np.array(x0).reshape(-1)
 
-        if type(ui) is int or type(ui) is float or type(ui) is list:
-            ui = np.array(ui).reshape(-1)
+        if type(u0) is int or type(u0) is float or type(u0) is list:
+            u0 = np.array(u0).reshape(-1)
         elif type(xi) is np.ndarray:
-            ui = np.array(ui).reshape(-1)
+            u0 = np.array(u0).reshape(-1)
             
         if type(r) is int or type(r) is float:
             r = r * np.ones((n, 1))
@@ -614,10 +617,15 @@ class System:
         u = np.zeros((n, nu))
 
         n_iters = np.zeros((n, 1))
-        
-        xm[0] = xi
-        dx = xm[0]
-        u[0] = ui
+
+        # Initial conditions
+        u[0] = u0
+        xm[0] = x0
+        y[0] = Cm @ xm[0]
+
+        # System change due to initial conditions
+        xm[1] = Am @ xm[0] + Bm @ u[0]
+        y[1] = Cm @ xm[1]
 
         Ky = self.Ky
         Kx = self.Kx
@@ -632,10 +640,9 @@ class System:
                 ud = np.tile(ud, (n, 1))
 
         # Simulation
-        for i in range(n - 1):
+        for i in range(1, n - 1):
             # Updates the output and dx
-            y[i] = Cm @ xm[i]
-            dx = xm[i] - dx
+            dx = xm[i] - xm[i - 1]
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
@@ -644,22 +651,21 @@ class System:
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, n_iter = self.opt(xm[i], dx, xa, u[i], r[i], solver=solver)
+                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], r[i], solver=solver)
             
-            u[i] = u[i] + du
+            u[i] = u[i - 1] + du
             n_iters[i] = n_iter
 
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
+            y[i + 1] = Cm @ xm[i]
 
-            # Update variables for next iteration
-            dx = xm[i]
-            u[i + 1] = u[i]
 
-        # Updates last value of y
-        y[n - 1] = Cm @ xm[n - 1]
-
-        n_iters[n - 1] = n_iter
+        # Populates last value of u and n_iters, otherwise they would be zero.
+        # This is just for plotting effects, and the last value of u and n_iters
+        # do not have any meaning
+        u[n - 1] = u[n - 2]
+        n_iters[n - 1] = n_iters[n - 2]
 
         results = {}
         results['u'] = u

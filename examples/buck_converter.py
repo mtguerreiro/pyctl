@@ -2,8 +2,7 @@ import pyctl as ctl
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
-
-#plt.ion()
+plt.ion()
 
 # --- Model ---
 # Model parameters
@@ -38,8 +37,8 @@ n = 100
 r = 8
 
 # Initial conditions
-xi = 0
-ui = 0
+x0 = 0
+u0 = 0
 
 # --- System ---
 # Model matrices
@@ -71,15 +70,15 @@ sys = ctl.mpc.System(
     )
 
 # --- Sim with receding horizon ---
-data = sys.sim(xi, ui, r, n)
+data = sys.sim(x0, u0, r, n)
 
 # --- Plots ---
 t = dt * np.arange(n)
 
 ax = plt.subplot(3,1,1)
-plt.title('Duty-cycle', fontsize=11)
+plt.title('Control input', fontsize=11)
 plt.step(t / 1e-3, data['u'], where='post')
-plt.ylabel('Control')
+plt.ylabel('Amplitude')
 plt.gca().tick_params(labelbottom=False)
 plt.grid()
 plt.xlim([t[0]/1e-3, t[-1]/1e-3])
@@ -99,5 +98,3 @@ plt.xlabel('Time (ms)')
 plt.grid()
 
 plt.tight_layout()
-
-plt.show()
