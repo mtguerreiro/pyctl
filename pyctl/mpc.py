@@ -146,6 +146,22 @@ def control_weighting_matrix(r_w, lc):
     return R_bar
 
 
+def spectrum_weighting_matrix(q, l_pred, l_past):
+
+    l = l_pred + l_past
+    
+    if q is None:
+        return np.zeros((l, l))
+
+    Q = np.diag(q)
+    W = np.zeros((l, l), dtype=complex)
+    for ni in range(l):
+        W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(l) / l)
+    Qw = W.conj().T @ Q @ W / l**2
+    
+    return Qw.real
+
+
 def reference_matrix(q, lp):
     r"""Computes the :math:`\bar{R_s}` matrix.
 
@@ -239,6 +255,81 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
     return (Ky[:m], K_mpc[:m, :])
 
 
+def opt_unc_gains2(A, B, C, l_pred, l_ctl, rw, qw, l_past):
+    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
+    closed-loop system.
+
+    Parameters
+    ----------
+    A : :class:`np.array`
+        :math:`A` matrix. An (n, n) numpy matrix.
+
+    B : :class:`np.array`
+        :math:`B` matrix. An (n + q, m) numpy matrix.
+
+    C : :class:`np.array`
+        :math:`C_m` matrix. A (q, n) numpy matrix.
+
+    l_pred : :class:`int`
+        Length of prediction horizon.
+
+    l_ctl : :class:`NoneType`, :class:`int`
+        Length of the prediction horizon where the control input increments
+        can be set. Note that `l_ctl` is less than or equal to `l_pred`. For
+        `l_ctl` less than `l_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
+        assumed.
+
+    n_ctn : :class:`NoneType`, :class:`int`
+        Lenght of the prediction horizon where the constraints are enforced.
+        Note that `n_ctn` is less than or equal to `l_ctl`. If set to `None`,
+        `n_ctn = l_ctl` is assumed.
+    
+    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weighting factor for the control inputs.If set to `None`, `rw` is set
+        to zero.
+
+    Returns
+    -------
+    (Ky, K_mpc) : :class:`tuple`
+        A tuple, containing two elements. The first element is the vector
+        `Ky` and the second element is the vector `K_mpc`.
+
+    """    
+    # Number of states
+    n = A.shape[0]
+
+    # Number of inputs
+    if B.ndim == 1:
+        m = 1
+    else:
+        m = B.shape[1]
+
+    # Number of outputs
+    if C.ndim == 1:
+        q = 1
+    else:
+        q = C.shape[0]
+
+    Rs_bar = reference_matrix(q, l_pred)
+
+    R = control_weighting_matrix(rw, l_ctl)
+
+    Qp = spectrum_weighting_matrix(qw, l_pred, l_past)
+
+    G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) )) 
+
+    F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
+    Phi_t = Phi.T
+    
+    K = np.linalg.inv(Phi_t @ Phi + R + G.T @ Qp @ G) @ Phi_t
+    K_mpc = K @ F
+    Ky = K @ Rs_bar
+    Ku_freq = G.T @ Qp
+
+    return (Ky[:m], K_mpc[:m, :], Ku_freq[:m, :])
+
+
 class System:
     """A class to create a discrete-time system for model predictive control
     simulations.
@@ -294,7 +385,7 @@ class System:
     def __init__(self,
              Am, Bm, Cm,
              l_pred, l_ctl=None, l_u_cnt=None, l_x_cnt=None,
-             rw=None, q=None,
+             rw=None, q=None, l_past=None,
              x_lim=None, u_lim=None):
 
         # System model and augmented model
@@ -336,12 +427,8 @@ class System:
 
         self.rw = rw
 
-        # Spectrum weighting factor
-        if type(q) is None:
-            q = 0.0
-        
-        if type(q) is int or type(q) is float:
-            r_w = np.array([q])
+        self.l_past = l_past
+        self.q = q
 
         # Bounds
         if type(x_lim) is list:
@@ -354,12 +441,24 @@ class System:
 
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
-        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-                                  self.l_pred, self.l_ctl, self.rw)
+        Ky, K_mpc, Ku_freq = opt_unc_gains2(
+            self.A, self.B, self.C,
+            self.l_pred, self.l_ctl, self.rw,
+            q, l_past
+            )
         Kx = K_mpc[:, :n_xm]
-
+        
         self.Ky = Ky
         self.Kx = Kx
+        self.Ku_freq = Ku_freq
+        
+##        n_xm = Am.shape[0]
+##        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
+##                                  self.l_pred, self.l_ctl, self.rw)
+##        Kx = K_mpc[:, :n_xm]
+##
+##        self.Ky = Ky
+##        self.Kx = Kx
 
         if x_lim is None:
             self.x_lim_idx = None
@@ -614,6 +713,10 @@ class System:
         y = np.zeros((n, ny))
         xa = np.zeros((A.shape[0], 1))
 
+        up = np.zeros((self.l_past, 1))
+        up[:] = u0
+        print(up.shape)
+
         u = np.zeros((n, nu))
 
         n_iters = np.zeros((n, 1))
@@ -629,6 +732,7 @@ class System:
 
         Ky = self.Ky
         Kx = self.Kx
+        Ku_freq = self.Ku_freq
 
         if Bd is None:
             Bd = np.zeros(Bm.shape)
@@ -646,7 +750,11 @@ class System:
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx
+                u_1 = u[i-1] * np.ones((self.l_pred, 1))
+                up[:-1] = up[1:]
+                up[-1] = u[i-1]
+                D = np.vstack(( up, u_1 ))
+                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + -Ku_freq @ D
                 n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
