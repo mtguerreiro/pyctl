@@ -401,6 +401,8 @@ class System:
         
         self.qp = pyctl.qp.QP(self.Ej, self.M, self.Hj, self.F, self.Phi)
 
+        self.du_1st_iter = None
+
     
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
@@ -555,6 +557,10 @@ class System:
         Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, D, r)
         du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
 
+        if type(self.du_1st_iter) is type(None):
+            self.du_1st_iter = du
+            self.u_1st_iter = D + self.G @ du.reshape(-1, 1)
+            
         return (du[:nu], n_iters)
 
 
