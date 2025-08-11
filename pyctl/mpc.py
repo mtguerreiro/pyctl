@@ -185,77 +185,7 @@ def reference_matrix(q, lp):
     return R_s_bar
 
 
-def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
-    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
-    closed-loop system.
-
-    Parameters
-    ----------
-    A : :class:`np.array`
-        :math:`A` matrix. An (n, n) numpy matrix.
-
-    B : :class:`np.array`
-        :math:`B` matrix. An (n + q, m) numpy matrix.
-
-    C : :class:`np.array`
-        :math:`C_m` matrix. A (q, n) numpy matrix.
-
-    l_pred : :class:`int`
-        Length of prediction horizon.
-
-    l_ctl : :class:`NoneType`, :class:`int`
-        Length of the prediction horizon where the control input increments
-        can be set. Note that `l_ctl` is less than or equal to `l_pred`. For
-        `l_ctl` less than `l_pred`, the increments are set zero to for the
-        remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
-        assumed.
-
-    n_ctn : :class:`NoneType`, :class:`int`
-        Lenght of the prediction horizon where the constraints are enforced.
-        Note that `n_ctn` is less than or equal to `l_ctl`. If set to `None`,
-        `n_ctn = l_ctl` is assumed.
-    
-    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
-        Weighting factor for the control inputs.If set to `None`, `rw` is set
-        to zero.
-
-    Returns
-    -------
-    (Ky, K_mpc) : :class:`tuple`
-        A tuple, containing two elements. The first element is the vector
-        `Ky` and the second element is the vector `K_mpc`.
-
-    """    
-    # Number of states
-    n = A.shape[0]
-
-    # Number of inputs
-    if B.ndim == 1:
-        m = 1
-    else:
-        m = B.shape[1]
-
-    # Number of outputs
-    if C.ndim == 1:
-        q = 1
-    else:
-        q = C.shape[0]
-
-    Rs_bar = reference_matrix(q, l_pred)
-
-    R = control_weighting_matrix(rw, l_ctl)
-
-    F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
-    Phi_t = Phi.T
-    
-    K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
-    K_mpc = K @ F
-    Ky = K @ Rs_bar
-
-    return (Ky[:m], K_mpc[:m, :])
-
-
-def opt_unc_gains2(A, B, C, l_pred, l_ctl, rw, qw, l_past):
+def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, qw, l_past):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -325,7 +255,7 @@ def opt_unc_gains2(A, B, C, l_pred, l_ctl, rw, qw, l_past):
     K = np.linalg.inv(Phi_t @ Phi + R + G.T @ Qp @ G) @ Phi_t
     K_mpc = K @ F
     Ky = K @ Rs_bar
-    Ku_freq = G.T @ Qp
+    Ku_freq = K @ G.T @ Qp
 
     return (Ky[:m], K_mpc[:m, :], Ku_freq[:m, :])
 
@@ -428,7 +358,7 @@ class System:
         self.rw = rw
 
         self.l_past = l_past
-        self.q = q
+        self.qw = q
 
         # Bounds
         if type(x_lim) is list:
@@ -441,10 +371,10 @@ class System:
 
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
-        Ky, K_mpc, Ku_freq = opt_unc_gains2(
+        Ky, K_mpc, Ku_freq = opt_unc_gains(
             self.A, self.B, self.C,
             self.l_pred, self.l_ctl, self.rw,
-            q, l_past
+            self.qw, self.l_past
             )
         Kx = K_mpc[:, :n_xm]
         
@@ -452,14 +382,6 @@ class System:
         self.Kx = Kx
         self.Ku_freq = Ku_freq
         
-##        n_xm = Am.shape[0]
-##        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-##                                  self.l_pred, self.l_ctl, self.rw)
-##        Kx = K_mpc[:, :n_xm]
-##
-##        self.Ky = Ky
-##        self.Kx = Kx
-
         if x_lim is None:
             self.x_lim_idx = None
 
@@ -489,6 +411,7 @@ class System:
         l_pred = self.l_pred; l_ctl = self.l_ctl;
         l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         rw = self.rw
+        l_past = self.l_past; qw = self.qw
 
         x_lim = self.x_lim
         u_lim = self.u_lim
@@ -569,7 +492,11 @@ class System:
         F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
         self.F = F; self.Phi = Phi
 
-        Ej = Phi.T @ Phi + R_bar
+        Qp = spectrum_weighting_matrix(self.qw, l_pred, l_past)
+        G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) ))
+        self.Qp = Qp; self.G = G
+
+        Ej = Phi.T @ Phi + R_bar + G.T @ Qp @ G
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
@@ -580,18 +507,19 @@ class System:
             self.Hj = None
 
 
-    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
+    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, D, r):
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
         l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         F = self.F; Phi = self.Phi
+        G = self.G; Qp = self.Qp
         Rs_bar = self.Rs_bar
        
         u_lim = self.u_lim
         x_lim = self.x_lim
 
-        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1) - G.T @ Qp @ D )
 
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
@@ -620,11 +548,11 @@ class System:
         return (Fj, y)
 
 
-    def opt(self, xm, dx, xa, ui, r, solver='hild'):
+    def opt(self, xm, dx, xa, ui, D, r, solver='hild'):
 
         nu = ui.shape[0]
 
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, D, r)
         du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
 
         return (du[:nu], n_iters)
@@ -715,7 +643,6 @@ class System:
 
         up = np.zeros((self.l_past, 1))
         up[:] = u0
-        print(up.shape)
 
         u = np.zeros((n, nu))
 
@@ -748,18 +675,19 @@ class System:
             # Updates the output and dx
             dx = xm[i] - xm[i - 1]
 
+            u_1 = u[i-1] * np.ones((self.l_pred, 1))
+            up[:-1] = up[1:]
+            up[-1] = u[i-1]
+            D = np.vstack(( up, u_1 ))
+                
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                u_1 = u[i-1] * np.ones((self.l_pred, 1))
-                up[:-1] = up[1:]
-                up[-1] = u[i-1]
-                D = np.vstack(( up, u_1 ))
                 du = -Ky @ (y[i] - r[i]) + -Kx @ dx + -Ku_freq @ D
                 n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], r[i], solver=solver)
+                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], D, r[i], solver=solver)
             
             u[i] = u[i - 1] + du
             n_iters[i] = n_iter
