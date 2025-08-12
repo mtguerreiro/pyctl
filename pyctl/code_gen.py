@@ -43,16 +43,18 @@ def gen_py_cdmpc_dll(source_path):
 
     plat = platform.system()
 
+    make_cmd = ['cmake', '..']
+    make = 'ninja'
+
     if plat == 'Linux':
-        subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
     elif plat == 'Windows':
-        subprocess.run(['cmake', '..', '-G', 'MinGW Makefiles'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.dll'
     else:
         raise ValueError('Platform not supported for code generation.')
 
-    subprocess.run(['make'], cwd=cdmpc_py_build_dir, check=True)
+    subprocess.run(make_cmd, cwd=cdmpc_py_build_dir, check=True)
+    subprocess.run(make, cwd=cdmpc_py_build_dir, check=True)
 
     return dll_path
 
@@ -63,6 +65,7 @@ class Hildreth_Solver_Settings:
     max_iter : int = 200
     fixed_iter : bool = True
     normalize_h: bool = False
+
 
 class Hildreth:
 
@@ -136,7 +139,7 @@ class Hildreth:
 
         pred_matrices = self.Am_Bm_matrices_pred(self.model.Am, self.model.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
 
-        kx_ky_gains = self.Kx_Ky_gains(self.model.Kx, self.model.Ky, ftype=ftype, prefix=prefix)
+        kx_ky_gains = self.Kx_Ky_gains(self.model.Kx, self.model.Ky, self.model.Ku_freq, ftype=ftype, prefix=prefix)
         
         if (u_lim is not None) or (x_lim is not None):
             qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
@@ -162,6 +165,7 @@ class Hildreth:
         n_xa = self.model.A.shape[0]
         l_pred = self.model.l_pred
         l_ctl = self.model.l_ctl
+        l_past = self.model.l_past
 
         if (x_lim is not None) or (u_lim is not None):
             l_u_cnt = self.model.l_u_cnt
@@ -200,7 +204,7 @@ class Hildreth:
         
         defs = self.defs_header(
             n_xm, n_xa, ny, nu, nd,
-            l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
+            l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past, n_lambda,
             n_in_cnt, n_st_cnt,
             solver_settings,
             scaling=scaling,
@@ -402,7 +406,7 @@ class Hildreth:
         return txt
 
 
-    def Kx_Ky_gains(self, Kx, Ky, ftype='src', prefix=None):
+    def Kx_Ky_gains(self, Kx, Ky, Ku_freq, ftype='src', prefix=None):
 
         if prefix is None:
             prefix = ''
@@ -421,11 +425,13 @@ class Hildreth:
 
         Kx_txt = extern + 'float {:}DMPC_Kx'.format(prefix)
         Ky_txt = extern + 'float {:}DMPC_Ky'.format(prefix)
+        Ku_freq_txt = extern + 'float {:}DMPC_Ku_freq'.format(prefix)
 
         Kx_txt = _export_np_array_to_c(Kx, Kx_txt, fill=fill) + '\n'
         Ky_txt = _export_np_array_to_c(Ky, Ky_txt, fill=fill) + '\n'
+        Ku_freq_txt = _export_np_array_to_c(Ku_freq, Ku_freq_txt, fill=fill) + '\n'
 
-        txt = '\n' + comment + Kx_txt + nl + Ky_txt
+        txt = '\n' + comment + Kx_txt + nl + Ky_txt + nl + Ku_freq_txt
         
         return txt
     
@@ -530,7 +536,13 @@ class Hildreth:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
+    def defs_header(
+        self,
+        n_xm, n_xa, ny, nu, nd,
+        l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past,
+        n_lambda, nu_cnt, n_st_cnt,
+        solver_settings, scaling=1.0, prefix=None
+        ):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -574,6 +586,7 @@ class Hildreth:
         l_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_CTL', l_ctl)
         l_u_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_U_CNT', l_u_cnt)
         l_x_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_X_CNT', l_x_cnt)
+        l_past_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_PAST', l_past)
         n_lambda_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NLAMBDA', n_lambda)
 
         n_hor_txt = '\n/* Length of prediction, control and constraint horizons */\n'+\
@@ -581,6 +594,7 @@ class Hildreth:
                     '#define {:}\n'.format(l_ctl_def)+\
                     '#define {:}\n'.format(l_u_cnt_def)+\
                     '#define {:}\n'.format(l_x_cnt_def)+\
+                    '#define {:}\n'.format(l_past_def)+\
                     '#define {:}\n'.format(n_lambda_def)
 
 

@@ -25,7 +25,7 @@ class QP:
         self.cdmpc = CDMPC(dll)
             
 
-    def solve(self, xm, dx, xa, ui, r, Fj, y, solver='hild'):
+    def solve(self, xm, dx, xa, ui, D, r, Fj, y, solver='hild'):
         r"""Solves the QP problem given by:
 
         .. :math:
@@ -57,7 +57,7 @@ class QP:
             du_opt = du_opt.reshape(-1)
 
         elif solver == 'cdmpc':
-            du_opt, n_iters = self.cdmpc.solve(xm, dx, xa, ui, r)
+            du_opt, n_iters = self.cdmpc.solve(xm, dx, xa, ui, D, r)
             
         else:
             du_opt = qpsolvers.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1), solver=solver)
@@ -75,10 +75,10 @@ class CDMPC:
         self.dll = ctypes.CDLL(dll)
         
         self.dll.cdmpc_py_step.argtypes = (
-                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
+                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
                 )
 
-    def solve(self, xm, dx, xa, ui, r):
+    def solve(self, xm, dx, xa, ui, D, r):
 
         c_float_p = ctypes.POINTER(ctypes.c_float)
         
@@ -88,14 +88,16 @@ class CDMPC:
         xm_1 = xm_1.astype(np.float32)
         dx = dx.astype(np.float32)
         ui = ui.astype(np.float32)
-        r = r.astype(np.float32)        
+        r = r.astype(np.float32)
+        D = D.astype(np.float32)
 
         du = np.zeros(ui.shape, dtype=np.float32)
 
         n_iters = self.dll.cdmpc_py_step(
             xm.ctypes.data_as(c_float_p), xm_1.ctypes.data_as(c_float_p),
             r.ctypes.data_as(c_float_p), ui.ctypes.data_as(c_float_p),
-            du.ctypes.data_as(c_float_p))
+            D.ctypes.data_as(c_float_p), du.ctypes.data_as(c_float_p)
+        )
         
         return du, n_iters
 

@@ -146,7 +146,7 @@ def control_weighting_matrix(r_w, lc):
     return R_bar
 
 
-def spectrum_weighting_matrix(q, l_pred, l_past):
+def spectrum_weighting_matrix(q, l_pred, l_past, window='boxcar'):
 
     l = l_pred + l_past
     
@@ -158,8 +158,13 @@ def spectrum_weighting_matrix(q, l_pred, l_past):
     for ni in range(l):
         W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(l) / l)
     Qw = W.conj().T @ Q @ W / l**2
+
+    s = scipy.signal.get_window(window, l)
+    S = np.diag(s)
+
+    Qp = S.T @ Qw.real @ S
     
-    return Qw.real
+    return Qp
 
 
 def reference_matrix(q, lp):
@@ -185,7 +190,7 @@ def reference_matrix(q, lp):
     return R_s_bar
 
 
-def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, qw, l_past):
+def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, qw, l_past, window='boxcar'):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -245,7 +250,7 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, qw, l_past):
 
     R = control_weighting_matrix(rw, l_ctl)
 
-    Qp = spectrum_weighting_matrix(qw, l_pred, l_past)
+    Qp = spectrum_weighting_matrix(qw, l_pred, l_past, window=window)
 
     G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) )) 
 
@@ -315,7 +320,7 @@ class System:
     def __init__(self,
              Am, Bm, Cm,
              l_pred, l_ctl=None, l_u_cnt=None, l_x_cnt=None,
-             rw=None, q=None, l_past=None,
+             rw=None, q=None, l_past=None, window='boxcar',
              x_lim=None, u_lim=None):
 
         # System model and augmented model
@@ -359,6 +364,7 @@ class System:
 
         self.l_past = l_past
         self.qw = q
+        self.window = window
 
         # Bounds
         if type(x_lim) is list:
@@ -374,7 +380,7 @@ class System:
         Ky, K_mpc, Ku_freq = opt_unc_gains(
             self.A, self.B, self.C,
             self.l_pred, self.l_ctl, self.rw,
-            self.qw, self.l_past
+            self.qw, self.l_past, window=window
             )
         Kx = K_mpc[:, :n_xm]
         
@@ -414,10 +420,11 @@ class System:
         l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         rw = self.rw
         l_past = self.l_past; qw = self.qw
+        window = self.window
 
         x_lim = self.x_lim
         u_lim = self.u_lim
-                
+        
         # Number of inputs
         if B.ndim == 1:
             m = 1
@@ -494,7 +501,7 @@ class System:
         F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
         self.F = F; self.Phi = Phi
 
-        Qp = spectrum_weighting_matrix(self.qw, l_pred, l_past)
+        Qp = spectrum_weighting_matrix(self.qw, l_pred, l_past, window=window)
         G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) ))
         self.Qp = Qp; self.G = G
 
@@ -555,11 +562,11 @@ class System:
         nu = ui.shape[0]
 
         Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, D, r)
-        du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
+        du, n_iters = self.qp.solve(xm, dx, xa, ui, D, r, Fj, y, solver=solver)
 
-        if type(self.du_1st_iter) is type(None):
-            self.du_1st_iter = du
-            self.u_1st_iter = D + self.G @ du.reshape(-1, 1)
+        #if type(self.du_1st_iter) is type(None):
+        #    self.du_1st_iter = du
+        #    self.u_1st_iter = D + self.G @ du.reshape(-1, 1)
             
         return (du[:nu], n_iters)
 
@@ -687,13 +694,18 @@ class System:
             D = np.vstack(( up, u_1 ))
                 
             # Computes the control law for sampling instant i
-            if (self.u_lim is None) and (self.x_lim is None):
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + -Ku_freq @ D
-                n_iter = 0
-            else:
+            if solver == 'cdmpc':
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
                 du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], D, r[i], solver=solver)
+            else:
+                if (self.u_lim is None) and (self.x_lim is None):
+                    du = -Ky @ (y[i] - r[i]) + -Kx @ dx + -Ku_freq @ D
+                    n_iter = 0
+                else:
+                    xa[:n_xm, 0] = dx
+                    xa[n_xm:, 0] = y[i]
+                    du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], D, r[i], solver=solver)
             
             u[i] = u[i - 1] + du
             n_iters[i] = n_iter
@@ -750,6 +762,7 @@ class System:
         model.l_ctl = self.l_ctl
         model.l_u_cnt = self.l_u_cnt
         model.l_x_cnt = self.l_x_cnt
+        model.l_past = self.l_past
         
         model.u_lim = self.u_lim
         model.u_lim_idx = self.u_lim_idx
@@ -778,5 +791,6 @@ class System:
 
         model.Kx = self.Kx
         model.Ky = self.Ky
+        model.Ku_freq = self.Ku_freq
 
         return model
