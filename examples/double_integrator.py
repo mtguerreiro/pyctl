@@ -44,18 +44,22 @@ sys = ctl.mpc.System(Ad, Bd, Cd, l_pred=l_pred, l_ctl=l_ctl, rw=rw, u_lim=u_lim,
 data = sys.sim(x0, u0, r, n)
 
 # --- Plots ---
-#plt.ion()
-ax = plt.subplot(2,1,1)
+ax = plt.subplot(3,1,1)
 plt.plot(data['u'], label='u')
 plt.legend()
 plt.xlim([0, n - 1])
+plt.gca().tick_params(labelbottom=False)
 plt.grid()
 
-ax = plt.subplot(2,1,2, sharex=ax)
-plt.plot(data['y'], label='$x_1$ ($y$)')
+plt.subplot(3,1,2, sharex=ax)
 plt.plot(data['xm'][:, 1], label='$x_2$')
 plt.legend()
-plt.xlim([0, n - 1])
+plt.gca().tick_params(labelbottom=False)
 plt.grid()
 
-#plt.show()
+plt.subplot(3,1,3, sharex=ax)
+plt.plot(data['y'], label='$y$')
+plt.legend()
+plt.grid()
+
+plt.tight_layout()

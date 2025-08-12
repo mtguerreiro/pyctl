@@ -658,7 +658,7 @@ class System:
 
             # Applies the control law
             xm[i + 1] = Am @ xm[i] + Bm @ u[i] + Bd @ ud[i]
-            y[i + 1] = Cm @ xm[i]
+            y[i + 1] = Cm @ xm[i + 1]
 
 
         # Populates last value of u and n_iters, otherwise they would be zero.
