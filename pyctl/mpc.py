@@ -362,7 +362,10 @@ class System:
 
         self.rw = rw
 
-        self.l_past = l_past
+        if l_past is None:
+            self.l_past = l_pred
+        else:
+            self.l_past = l_past
         self.qw = q
         self.window = window
 
