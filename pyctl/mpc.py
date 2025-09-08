@@ -146,6 +146,41 @@ def control_weighting_matrix(r_w, lc):
     return R_bar
 
 
+def spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window='boxcar'):
+
+    m = Am.shape[0]
+    Cm = np.eye(m)
+
+    l = l_pred + l_past
+    
+    if q is None:
+        q = np.zeros(l * m)
+
+    Q = np.diag(q)
+    W = np.zeros( (l, l), dtype=complex)
+    for ni in range(l):
+        W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(l) / l)
+
+    W_I = np.kron( W, np.eye(m) )
+    
+    Qw = W_I.conj().T @ Q @ W_I / l**2
+
+    s = scipy.signal.get_window(window, l)
+    S = np.diag(s)
+    S_bar = np.kron( S, np.eye(m) )
+
+    Qw_bar = S_bar.T @ Qw.real @ S_bar
+
+    Fm, Phi_m = opt_matrices(Am, Bm, Cm, l_pred, l_pred)
+    zeros = np.zeros( (l_past * m, l_pred * m) ) 
+    lower_tri = np.tril( np.kron( np.ones((l_pred, l_pred)), np.eye(m) ) )
+    Phi_l = np.vstack(( zeros, lower_tri )) @ Phi_m
+
+    Lambda_1 = np.vstack(( zeros, lower_tri )) @ Fm
+    
+    return Qw_bar, Phi_l, Lambda_1
+
+
 def reference_matrix(q, lp):
     r"""Computes the :math:`\bar{R_s}` matrix.
 
@@ -169,7 +204,7 @@ def reference_matrix(q, lp):
     return R_s_bar
 
 
-def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
+def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, Qw_bar, Phi_l):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -232,11 +267,12 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
     F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
     Phi_t = Phi.T
     
-    K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t
-    K_mpc = K @ F
-    Ky = K @ Rs_bar
+    K = np.linalg.inv(Phi_t @ Phi + R + Phi_l.T @ Qw_bar @ Phi_l)
+    K_mpc = K @ Phi_t @ F
+    Ky = K @ Phi_t @ Rs_bar
+    K_freq = -K @ Phi_l.T @ Qw_bar
 
-    return (Ky[:m], K_mpc[:m, :])
+    return (Ky[:m], K_mpc[:m, :], K_freq[:m, :])
 
 
 class System:
@@ -294,7 +330,7 @@ class System:
     def __init__(self,
              Am, Bm, Cm,
              l_pred, l_ctl=None, l_u_cnt=None, l_x_cnt=None,
-             rw=None, q=None,
+             rw=None, q=None, l_past=None, window='boxcar',
              x_lim=None, u_lim=None):
 
         # System model and augmented model
@@ -341,7 +377,10 @@ class System:
             q = 0.0
         
         if type(q) is int or type(q) is float:
-            r_w = np.array([q])
+            q = np.array([q])
+
+        self.l_past = l_past
+        self.Qw_bar, self.Phi_l, self.Lambda_1 = spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window=window)
 
         # Bounds
         if type(x_lim) is list:
@@ -354,12 +393,16 @@ class System:
 
         # Gains for unconstrained problem
         n_xm = Am.shape[0]
-        Ky, K_mpc = opt_unc_gains(self.A, self.B, self.C, \
-                                  self.l_pred, self.l_ctl, self.rw)
+        Ky, K_mpc, K_freq = opt_unc_gains(
+            self.A, self.B, self.C,
+            self.l_pred, self.l_ctl, self.rw,
+            self.Qw_bar, self.Phi_l
+        )
         Kx = K_mpc[:, :n_xm]
 
         self.Ky = Ky
         self.Kx = Kx
+        self.K_freq = K_freq
 
         if x_lim is None:
             self.x_lim_idx = None
@@ -627,6 +670,8 @@ class System:
         xm[1] = Am @ xm[0] + Bm @ u[0]
         y[1] = Cm @ xm[1]
 
+        x_past = np.zeros((self.l_past * n_xm, 1))
+
         Ky = self.Ky
         Kx = self.Kx
 
@@ -646,7 +691,11 @@ class System:
 
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx
+                xx_1 = np.tile(xm[i].reshape(-1, 1), (self.l_pred, 1))
+                x_past[:-n_xm, :] = x_past[n_xm:, :]
+                x_past[-n_xm:, :] = xm[i].reshape(-1, 1)
+                X = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
+                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + self.K_freq @ X
                 n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
