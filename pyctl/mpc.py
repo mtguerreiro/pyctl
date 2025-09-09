@@ -516,7 +516,7 @@ class System:
         F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
         self.F = F; self.Phi = Phi
 
-        Ej = Phi.T @ Phi + R_bar
+        Ej = Phi.T @ Phi + R_bar + self.Phi_l.T @ self.Qw_bar @ self.Phi_l
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
@@ -527,7 +527,7 @@ class System:
             self.Hj = None
 
 
-    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, r):
+    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, Lambda, r):
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
@@ -539,6 +539,9 @@ class System:
         x_lim = self.x_lim
 
         Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
+
+        if self.l_past is not None:
+            Fj += self.Phi_l.T @ self.Qw_bar @ Lambda
 
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
@@ -567,11 +570,11 @@ class System:
         return (Fj, y)
 
 
-    def opt(self, xm, dx, xa, ui, r, solver='hild'):
+    def opt(self, xm, dx, xa, ui, Lambda, r, solver='hild'):
 
         nu = ui.shape[0]
 
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, r)
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, Lambda, r)
         du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
 
         return (du[:nu], n_iters)
@@ -692,18 +695,19 @@ class System:
             # Updates the output and dx
             dx = xm[i] - xm[i - 1]
 
+            xx_1 = np.tile(xm[i].reshape(-1, 1), (self.l_pred, 1))
+            x_past[:-n_xm, :] = x_past[n_xm:, :]
+            x_past[-n_xm:, :] = xm[i].reshape(-1, 1)
+            Lambda = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
+                
             # Computes the control law for sampling instant i
             if (self.u_lim is None) and (self.x_lim is None):
-                xx_1 = np.tile(xm[i].reshape(-1, 1), (self.l_pred, 1))
-                x_past[:-n_xm, :] = x_past[n_xm:, :]
-                x_past[-n_xm:, :] = xm[i].reshape(-1, 1)
-                Lambda = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
                 du = -Ky @ (y[i] - r[i]) + -Kx @ dx + self.K_freq @ Lambda
                 n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
                 xa[n_xm:, 0] = y[i]
-                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], r[i], solver=solver)
+                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], Lambda, r[i], solver=solver)
             
             u[i] = u[i - 1] + du
             n_iters[i] = n_iter
