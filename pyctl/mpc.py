@@ -163,7 +163,7 @@ def spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window='boxcar'):
 
     W_I = np.kron( W, np.eye(m) )
     
-    Qw = W_I.conj().T @ Q @ W_I / l**2
+    Qw = W_I.conj().T @ Q @ W_I / l
 
     s = scipy.signal.get_window(window, l)
     S = np.diag(s)
