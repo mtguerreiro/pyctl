@@ -150,7 +150,7 @@ def spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window='boxcar'):
 
     m = Am.shape[0]
     Cm = np.eye(m)
-
+        
     l = l_pred + l_past
     
     if q is None:
@@ -379,8 +379,11 @@ class System:
         if type(q) is int or type(q) is float:
             q = np.array([q])
 
-        self.l_past = l_past
-        self.Qw_bar, self.Phi_l, self.Lambda_1 = spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window=window)
+        if l_past is None:
+            self.l_past = l_pred
+        else:
+            self.l_past = l_past
+        self.Qw_bar, self.Phi_l, self.Lambda_1 = spectrum_weighting_matrix(q, Am, Bm, self.l_pred, self.l_past, window=window)
 
         # Bounds
         if type(x_lim) is list:
@@ -694,8 +697,8 @@ class System:
                 xx_1 = np.tile(xm[i].reshape(-1, 1), (self.l_pred, 1))
                 x_past[:-n_xm, :] = x_past[n_xm:, :]
                 x_past[-n_xm:, :] = xm[i].reshape(-1, 1)
-                X = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + self.K_freq @ X
+                Lambda = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
+                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + self.K_freq @ Lambda
                 n_iter = 0
             else:
                 xa[:n_xm, 0] = dx
