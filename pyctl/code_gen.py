@@ -47,12 +47,12 @@ def gen_py_cdmpc_dll(source_path):
         subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
     elif plat == 'Windows':
-        subprocess.run(['cmake', '..', '-G', 'MinGW Makefiles'], cwd=cdmpc_py_build_dir, check=True)
+        subprocess.run(['cmake', '..', '-G', 'Ninja'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.dll'
     else:
         raise ValueError('Platform not supported for code generation.')
 
-    subprocess.run(['make'], cwd=cdmpc_py_build_dir, check=True)
+    subprocess.run(['ninja'], cwd=cdmpc_py_build_dir, check=True)
 
     return dll_path
 
@@ -137,6 +137,7 @@ class Hildreth:
         pred_matrices = self.Am_Bm_matrices_pred(self.model.Am, self.model.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
 
         kx_ky_gains = self.Kx_Ky_gains(self.model.Kx, self.model.Ky, ftype=ftype, prefix=prefix)
+        kf_gains = self.Kf_gains(ftype=ftype, prefix=prefix)
         
         if (u_lim is not None) or (x_lim is not None):
             qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
@@ -146,7 +147,7 @@ class Hildreth:
             hild_matrices = ''
         
         txt = header + includes + in_cnt + st_cnt +\
-              out_idx + pred_matrices + kx_ky_gains +\
+              out_idx + pred_matrices + kx_ky_gains + kf_gains+\
               qp_matrices + hild_matrices +\
               end
 
@@ -162,6 +163,7 @@ class Hildreth:
         n_xa = self.model.A.shape[0]
         l_pred = self.model.l_pred
         l_ctl = self.model.l_ctl
+        l_past = self.model.l_past
 
         if (x_lim is not None) or (u_lim is not None):
             l_u_cnt = self.model.l_u_cnt
@@ -200,7 +202,7 @@ class Hildreth:
         
         defs = self.defs_header(
             n_xm, n_xa, ny, nu, nd,
-            l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
+            l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past, n_lambda,
             n_in_cnt, n_st_cnt,
             solver_settings,
             scaling=scaling,
@@ -245,7 +247,7 @@ class Hildreth:
 
         DU1 = (-Ej_inv)[:m, :]
         DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
-
+        
         return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
 
 
@@ -430,6 +432,50 @@ class Hildreth:
         return txt
     
 
+    def Kf_gains(self, ftype='src', prefix=None):
+
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        nl = '\n'
+        extern = ''
+        if ftype != 'src':
+            fill = False
+            extern = 'extern '
+            nl = ''
+        
+        comment = '/* Optimal freq. domain MPC unconstrained problems */\n'
+
+        if self.model.Bm.ndim == 1:
+            m = 1
+        else:
+            m = self.model.Bm.shape[1]
+
+        n_xm = self.model.Am.shape[0]
+        l_pred = self.model.l_pred
+        l_past = self.model.l_past
+
+        Kf = (self.model.Phi_l.T @ self.model.Qw_bar)[:m, :]
+        K_f1 = Kf[:m, :n_xm*l_past]
+        K_f2 = Kf[:m, n_xm*l_past:] @ np.tile( np.eye(n_xm), (l_pred,1) )
+        K_f3 = Kf[:m, n_xm*l_past:] @ self.model.Lt @ self.model.Fm
+
+        K_f1_txt = extern + 'float {:}DMPC_K_f1'.format(prefix)
+        K_f2_txt = extern + 'float {:}DMPC_K_f2'.format(prefix)
+        K_f3_txt = extern + 'float {:}DMPC_K_f3'.format(prefix)
+
+        K_f1_txt = _export_np_array_to_c(K_f1, K_f1_txt, fill=fill) + '\n'
+        K_f2_txt = _export_np_array_to_c(K_f2, K_f2_txt, fill=fill) + '\n'
+        K_f3_txt = _export_np_array_to_c(K_f3, K_f3_txt, fill=fill) + '\n'
+
+        txt = '\n' + comment + K_f1_txt + nl + K_f2_txt + nl + K_f3_txt
+        
+        return txt
+
+    
     def qp_matrices(self, Ej, M, ftype='src', prefix=None):
 
         n = Ej.shape[0]
@@ -522,15 +568,15 @@ class Hildreth:
         
         DU2_txt = nl + extern + 'float {:}DMPC_M_DU_2'.format(prefix)
         DU2_txt = _export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
-
+        
         txt = comments + \
               Fj1_txt + Fj2_txt + Fx_txt +\
               Kj1_txt + Hj_txt + DU1_txt + DU2_txt
-        
+
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
+    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
 
         header = '/**\n'\
          ' * @file {:}\n'\
@@ -574,6 +620,7 @@ class Hildreth:
         l_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_CTL', l_ctl)
         l_u_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_U_CNT', l_u_cnt)
         l_x_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_X_CNT', l_x_cnt)
+        l_past_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_PAST', l_past)
         n_lambda_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NLAMBDA', n_lambda)
 
         n_hor_txt = '\n/* Length of prediction, control and constraint horizons */\n'+\
@@ -581,6 +628,7 @@ class Hildreth:
                     '#define {:}\n'.format(l_ctl_def)+\
                     '#define {:}\n'.format(l_u_cnt_def)+\
                     '#define {:}\n'.format(l_x_cnt_def)+\
+                    '#define {:}\n'.format(l_past_def)+\
                     '#define {:}\n'.format(n_lambda_def)
 
 
@@ -805,6 +853,11 @@ class CodeGenData:
 
     Kx : np.ndarray
     Ky : np.ndarray
+
+    l_past : int
+    Phi_l : np.ndarray
+    Lm : np.ndarray
+    Lt : np.ndarray
 
 
 @dataclass

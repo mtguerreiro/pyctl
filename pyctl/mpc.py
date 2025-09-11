@@ -146,7 +146,7 @@ def control_weighting_matrix(r_w, lc):
     return R_bar
 
 
-def spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window='boxcar'):
+def spectrum_weighting_matrices(q, Am, Bm, l_pred, l_past, window='boxcar'):
 
     m = Am.shape[0]
     Cm = np.eye(m)
@@ -178,7 +178,7 @@ def spectrum_weighting_matrix(q, Am, Bm, l_pred, l_past, window='boxcar'):
 
     Lambda_1 = np.vstack(( zeros, lower_tri )) @ Fm
     
-    return Qw_bar, Phi_l, Lambda_1
+    return Qw_bar, Phi_l, Fm, lower_tri, Lambda_1
 
 
 def reference_matrix(q, lp):
@@ -383,7 +383,7 @@ class System:
             self.l_past = l_pred
         else:
             self.l_past = l_past
-        self.Qw_bar, self.Phi_l, self.Lambda_1 = spectrum_weighting_matrix(q, Am, Bm, self.l_pred, self.l_past, window=window)
+        self.Qw_bar, self.Phi_l, self.Fm, self.Lt, self.Lambda_1 = spectrum_weighting_matrices(q, Am, Bm, self.l_pred, self.l_past, window=window)
 
         # Bounds
         if type(x_lim) is list:
@@ -793,4 +793,10 @@ class System:
         model.Kx = self.Kx
         model.Ky = self.Ky
 
+        model.l_past = self.l_past
+        model.Phi_l = self.Phi_l
+        model.Fm = self.Fm
+        model.Lt = self.Lt
+        model.Qw_bar = self.Qw_bar
+        
         return model
