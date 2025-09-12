@@ -25,7 +25,7 @@ class QP:
         self.cdmpc = CDMPC(dll)
             
 
-    def solve(self, xm, dx, xa, ui, r, Fj, y, solver='hild'):
+    def solve(self, xm, dx, xa, ui, Xp, r, Fj, y, solver='hild'):
         r"""Solves the QP problem given by:
 
         .. :math:
@@ -57,7 +57,7 @@ class QP:
             du_opt = du_opt.reshape(-1)
 
         elif solver == 'cdmpc':
-            du_opt, n_iters = self.cdmpc.solve(xm, dx, xa, ui, r)
+            du_opt, n_iters = self.cdmpc.solve(xm, dx, xa, ui, Xp, r)
             
         else:
             du_opt = qpsolvers.solve_qp(Ej, Fj.reshape(-1), M, y.reshape(-1), solver=solver)

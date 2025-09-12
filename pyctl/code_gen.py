@@ -458,7 +458,8 @@ class Hildreth:
         l_pred = self.model.l_pred
         l_past = self.model.l_past
 
-        Kf = (self.model.Phi_l.T @ self.model.Qw_bar)[:m, :]
+        Ej_inv = np.linalg.inv(self.model.Ej)
+        Kf = -(Ej_inv @ self.model.Phi_l.T @ self.model.Qw_bar)[:m, :]
         K_f1 = Kf[:m, :n_xm*l_past]
         K_f2 = Kf[:m, n_xm*l_past:] @ np.tile( np.eye(n_xm), (l_pred,1) )
         K_f3 = Kf[:m, n_xm*l_past:] @ self.model.Lt @ self.model.Fm

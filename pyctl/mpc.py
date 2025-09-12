@@ -575,7 +575,7 @@ class System:
         nu = ui.shape[0]
 
         Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, Lambda, r)
-        du, n_iters = self.qp.solve(xm, dx, xa, ui, r, Fj, y, solver=solver)
+        du, n_iters = self.qp.solve(xm, dx, xa, ui, Lambda, r, Fj, y, solver=solver)
 
         return (du[:nu], n_iters)
 
