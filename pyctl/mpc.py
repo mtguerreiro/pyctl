@@ -192,7 +192,7 @@ def input_spectrum_weighting_matrix(q, l_pred, l_past, window='boxcar'):
     W = np.zeros((l, l), dtype=complex)
     for ni in range(l):
         W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(l) / l)
-    Qw = W.conj().T @ Q @ W / l**2
+    Qw = W.conj().T @ Q @ W / l
 
     s = scipy.signal.get_window(window, l)
     S = np.diag(s)
