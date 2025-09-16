@@ -43,6 +43,9 @@ def gen_py_cdmpc_dll(source_path):
 
     plat = platform.system()
 
+    make_cmd = ['cmake', '..']
+    make = 'ninja'
+
     if plat == 'Linux':
         subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
@@ -63,6 +66,7 @@ class Hildreth_Solver_Settings:
     max_iter : int = 200
     fixed_iter : bool = True
     normalize_h: bool = False
+
 
 class Hildreth:
 
@@ -457,22 +461,28 @@ class Hildreth:
         n_xm = self.model.Am.shape[0]
         l_pred = self.model.l_pred
         l_past = self.model.l_past
+        Ku_freq = self.model.Ku_freq
 
-        Ej_inv = np.linalg.inv(self.model.Ej)
-        Kf = -(Ej_inv @ self.model.Phi_l.T @ self.model.Qw_bar)[:m, :]
+        #Ej_inv = np.linalg.inv(self.model.Ej)
+        Kf = self.model.Kx_freq
         K_f1 = Kf[:m, :n_xm*l_past]
         K_f2 = Kf[:m, n_xm*l_past:] @ np.tile( np.eye(n_xm), (l_pred,1) )
         K_f3 = Kf[:m, n_xm*l_past:] @ self.model.Lt @ self.model.Fm
 
-        K_f1_txt = extern + 'float {:}DMPC_K_f1'.format(prefix)
-        K_f2_txt = extern + 'float {:}DMPC_K_f2'.format(prefix)
-        K_f3_txt = extern + 'float {:}DMPC_K_f3'.format(prefix)
+        K_f1_txt = extern + 'float {:}DMPC_Kx_freq_1'.format(prefix)
+        K_f2_txt = extern + 'float {:}DMPC_Kx_freq_2'.format(prefix)
+        K_f3_txt = extern + 'float {:}DMPC_Kx_freq_3'.format(prefix)
+
+        Ku_freq_txt = extern + 'float {:}DMPC_Ku_freq'.format(prefix)
 
         K_f1_txt = _export_np_array_to_c(K_f1, K_f1_txt, fill=fill) + '\n'
         K_f2_txt = _export_np_array_to_c(K_f2, K_f2_txt, fill=fill) + '\n'
         K_f3_txt = _export_np_array_to_c(K_f3, K_f3_txt, fill=fill) + '\n'
-
-        txt = '\n' + comment + K_f1_txt + nl + K_f2_txt + nl + K_f3_txt
+        Ku_freq_txt = _export_np_array_to_c(Ku_freq, Ku_freq_txt, fill=fill) + '\n'
+        
+        txt = '\n' + comment + \
+              K_f1_txt + nl + K_f2_txt + nl + K_f3_txt + nl + \
+              Ku_freq_txt
         
         return txt
 
@@ -577,7 +587,13 @@ class Hildreth:
         return txt
 
 
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
+    def defs_header(
+        self,
+        n_xm, n_xa, ny, nu, nd,
+        l_pred, l_ctl, l_u_cnt, l_x_cnt, l_past,
+        n_lambda, nu_cnt, n_st_cnt,
+        solver_settings, scaling=1.0, prefix=None
+        ):
 
         header = '/**\n'\
          ' * @file {:}\n'\

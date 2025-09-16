@@ -146,7 +146,7 @@ def control_weighting_matrix(r_w, lc):
     return R_bar
 
 
-def spectrum_weighting_matrices(q, Am, Bm, l_pred, l_past, window='boxcar'):
+def state_spectrum_weighting_matrices(q, Am, Bm, l_pred, l_past, window='boxcar'):
 
     m = Am.shape[0]
     Cm = np.eye(m)
@@ -181,6 +181,27 @@ def spectrum_weighting_matrices(q, Am, Bm, l_pred, l_past, window='boxcar'):
     return Qw_bar, Phi_l, Fm, lower_tri, Lambda_1
 
 
+def input_spectrum_weighting_matrix(q, l_pred, l_past, window='boxcar'):
+
+    l = l_pred + l_past
+    
+    if q is None:
+        return np.zeros((l, l))
+
+    Q = np.diag(q)
+    W = np.zeros((l, l), dtype=complex)
+    for ni in range(l):
+        W[ni, :] = np.exp(-1j * 2 * np.pi * ni * np.arange(l) / l)
+    Qw = W.conj().T @ Q @ W / l**2
+
+    s = scipy.signal.get_window(window, l)
+    S = np.diag(s)
+
+    Qp = S.T @ Qw.real @ S
+    
+    return Qp
+
+
 def reference_matrix(q, lp):
     r"""Computes the :math:`\bar{R_s}` matrix.
 
@@ -204,7 +225,7 @@ def reference_matrix(q, lp):
     return R_s_bar
 
 
-def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, Qw_bar, Phi_l):
+def opt_unc_gains(Am, Bm, Cm, l_pred, l_ctl, l_past, rw, qu, qx, window='boxcar'):
     r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
     closed-loop system.
 
@@ -244,7 +265,9 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, Qw_bar, Phi_l):
         A tuple, containing two elements. The first element is the vector
         `Ky` and the second element is the vector `K_mpc`.
 
-    """    
+    """
+    A, B, C = aug(Am, Bm, Cm)
+
     # Number of states
     n = A.shape[0]
 
@@ -264,15 +287,22 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw, Qw_bar, Phi_l):
 
     R = control_weighting_matrix(rw, l_ctl)
 
+    Qp = input_spectrum_weighting_matrix(qu, l_pred, l_past, window=window)
+
+    G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) )) 
+
     F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
     Phi_t = Phi.T
-    
-    K = np.linalg.inv(Phi_t @ Phi + R + Phi_l.T @ Qw_bar @ Phi_l)
+
+    Qw_bar, Phi_l, _, _, _ = state_spectrum_weighting_matrices(qx, Am, Bm, l_pred, l_past, window=window)
+
+    K = np.linalg.inv(Phi_t @ Phi + R + G.T @ Qp @ G + Phi_l.T @ Qw_bar @ Phi_l)
     K_mpc = K @ Phi_t @ F
     Ky = K @ Phi_t @ Rs_bar
-    K_freq = -K @ Phi_l.T @ Qw_bar
+    Kx_freq = -K @ Phi_l.T @ Qw_bar
+    Ku_freq = K @ Phi_t @ G.T @ Qp
 
-    return (Ky[:m], K_mpc[:m, :], K_freq[:m, :])
+    return (Ky[:m], K_mpc[:m, :], Ku_freq[:m, :], Kx_freq[:m, :])
 
 
 class System:
@@ -330,7 +360,7 @@ class System:
     def __init__(self,
              Am, Bm, Cm,
              l_pred, l_ctl=None, l_u_cnt=None, l_x_cnt=None,
-             rw=None, q=None, l_past=None, window='boxcar',
+             rw=None, qu=None, qx=None, l_past=None, window='boxcar',
              x_lim=None, u_lim=None):
 
         # System model and augmented model
@@ -372,18 +402,17 @@ class System:
 
         self.rw = rw
 
-        # Spectrum weighting factor
-        if type(q) is None:
-            q = 0.0
-        
-        if type(q) is int or type(q) is float:
-            q = np.array([q])
-
         if l_past is None:
             self.l_past = l_pred
         else:
             self.l_past = l_past
-        self.Qw_bar, self.Phi_l, self.Fm, self.Lt, self.Lambda_1 = spectrum_weighting_matrices(q, Am, Bm, self.l_pred, self.l_past, window=window)
+
+        self.qu = qu
+        self.qx = qx
+
+        self.Qw_bar, self.Phi_l, self.Fm, self.Lt, self.Lambda_1 = state_spectrum_weighting_matrices(qx, Am, Bm, self.l_pred, self.l_past, window=window)
+
+        self.window = window
 
         # Bounds
         if type(x_lim) is list:
@@ -394,24 +423,27 @@ class System:
         self.x_lim = x_lim
         self.u_lim = u_lim
 
-        # Gains for unconstrained problem
-        n_xm = Am.shape[0]
-        Ky, K_mpc, K_freq = opt_unc_gains(
-            self.A, self.B, self.C,
-            self.l_pred, self.l_ctl, self.rw,
-            self.Qw_bar, self.Phi_l
-        )
-        Kx = K_mpc[:, :n_xm]
-
-        self.Ky = Ky
-        self.Kx = Kx
-        self.K_freq = K_freq
-
         if x_lim is None:
             self.x_lim_idx = None
 
         if u_lim is None:
             self.u_lim_idx = None
+        
+        # Gains for unconstrained problem
+        n_xm = Am.shape[0]
+
+        Ky, K_mpc, Ku_freq, Kx_freq = opt_unc_gains(
+            self.Am, self.Bm, self.Cm,
+            self.l_pred, self.l_ctl, self.l_past,
+            self.rw, self.qu, self.qx, window=window
+            )
+        
+        Kx = K_mpc[:, :n_xm]
+        
+        self.Ky = Ky
+        self.Kx = Kx
+        self.Kx_freq = Kx_freq
+        self.Ku_freq = Ku_freq
 
         self.gen_static_qp_matrices()
 
@@ -426,6 +458,8 @@ class System:
         
         self.qp = pyctl.qp.QP(self.Ej, self.M, self.Hj, self.F, self.Phi)
 
+        self.du_1st_iter = None
+
     
     def gen_static_qp_matrices(self):
         """Sets constant matrices, to be used later by the optimization.
@@ -436,10 +470,13 @@ class System:
         l_pred = self.l_pred; l_ctl = self.l_ctl;
         l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         rw = self.rw
+        l_past = self.l_past; qu = self.qu
+        window = self.window
+        Phi_l = self.Phi_l; Qw_bar = self.Qw_bar
 
         x_lim = self.x_lim
         u_lim = self.u_lim
-                
+        
         # Number of inputs
         if B.ndim == 1:
             m = 1
@@ -516,7 +553,11 @@ class System:
         F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
         self.F = F; self.Phi = Phi
 
-        Ej = Phi.T @ Phi + R_bar + self.Phi_l.T @ self.Qw_bar @ self.Phi_l
+        Qp = input_spectrum_weighting_matrix(self.qu, l_pred, l_past, window=window)
+        G = np.vstack(( np.zeros((l_past, l_pred)), np.tril(np.ones((l_pred, l_pred))) ))
+        self.Qp = Qp; self.G = G
+        
+        Ej = Phi.T @ Phi + R_bar + G.T @ Qp @ G + Phi_l.T @ Qw_bar @ Phi_l
         Ej_inv = np.linalg.inv(Ej)
         self.Ej = Ej; self.Ej_inv = Ej_inv
 
@@ -527,21 +568,21 @@ class System:
             self.Hj = None
 
 
-    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, Lambda, r):
+    def gen_dyn_qp_matrices(self, xm, dx, xa, ui, D, Lambda, r):
         """Sets dynamic matrices, to be used later by the optimization.
 
         """
         l_u_cnt = self.l_u_cnt; l_x_cnt = self.l_x_cnt
         F = self.F; Phi = self.Phi
+        G = self.G; Qp = self.Qp
         Rs_bar = self.Rs_bar
+        Phi_l = self.Phi_l; Qw_bar = self.Qw_bar
        
         u_lim = self.u_lim
         x_lim = self.x_lim
 
-        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1))
-
-        if self.l_past is not None:
-            Fj += self.Phi_l.T @ self.Qw_bar @ Lambda
+        Fj = -Phi.T @ (Rs_bar @ r.reshape(-1, 1) - F @ xa.reshape(-1, 1) - G.T @ Qp @ D )
+        Fj += Phi_l.T @ Qw_bar @ Lambda
 
         # Creates the right-hand side inequality vector, starting first with
         # the control inequality constraints
@@ -570,13 +611,13 @@ class System:
         return (Fj, y)
 
 
-    def opt(self, xm, dx, xa, ui, Lambda, r, solver='hild'):
+    def opt(self, xm, dx, xa, ui, D, Lambda, r, solver='hild'):
 
         nu = ui.shape[0]
 
-        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, Lambda, r)
-        du, n_iters = self.qp.solve(xm, dx, xa, ui, Lambda, r, Fj, y, solver=solver)
-
+        Fj, y = self.gen_dyn_qp_matrices(xm, dx, xa, ui, D, Lambda, r)
+        du, n_iters = self.qp.solve(xm, dx, xa, ui, D, Lambda, r, Fj, y, solver=solver)
+            
         return (du[:nu], n_iters)
 
 
@@ -663,6 +704,9 @@ class System:
         y = np.zeros((n, ny))
         xa = np.zeros((A.shape[0], 1))
 
+        up = np.zeros((self.l_past, 1))
+        up[:] = u0
+
         u = np.zeros((n, nu))
 
         n_iters = np.zeros((n, 1))
@@ -680,6 +724,7 @@ class System:
 
         Ky = self.Ky
         Kx = self.Kx
+        Ku_freq = self.Ku_freq
 
         if Bd is None:
             Bd = np.zeros(Bm.shape)
@@ -695,19 +740,28 @@ class System:
             # Updates the output and dx
             dx = xm[i] - xm[i - 1]
 
+            xa[:n_xm, 0] = dx
+            xa[n_xm:, 0] = y[i]
+                
             xx_1 = np.tile(xm[i].reshape(-1, 1), (self.l_pred, 1))
             x_past[:-n_xm, :] = x_past[n_xm:, :]
             x_past[-n_xm:, :] = xm[i].reshape(-1, 1)
             Lambda = np.vstack((x_past, xx_1)) + self.Lambda_1 @ dx.reshape(-1, 1)
-                
-            # Computes the control law for sampling instant i
-            if (self.u_lim is None) and (self.x_lim is None):
-                du = -Ky @ (y[i] - r[i]) + -Kx @ dx + self.K_freq @ Lambda
-                n_iter = 0
+
+            u_1 = u[i-1] * np.ones((self.l_pred, 1))
+            up[:-1] = up[1:]
+            up[-1] = u[i-1]
+            D = np.vstack(( up, u_1 ))
+
+            if solver == 'cdmpc':
+                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], D, Lambda, r[i], solver=solver)
             else:
-                xa[:n_xm, 0] = dx
-                xa[n_xm:, 0] = y[i]
-                du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], Lambda, r[i], solver=solver)
+                # Computes the control law for sampling instant i
+                if (self.u_lim is None) and (self.x_lim is None):
+                    du = -Ky @ (y[i] - r[i]) + -Kx @ dx + -self.Ku_freq @ D + self.Kx_freq @ Lambda
+                    n_iter = 0
+                else:
+                    du, n_iter = self.opt(xm[i], dx, xa, u[i - 1], D, Lambda, r[i], solver=solver)
             
             u[i] = u[i - 1] + du
             n_iters[i] = n_iter
@@ -764,6 +818,7 @@ class System:
         model.l_ctl = self.l_ctl
         model.l_u_cnt = self.l_u_cnt
         model.l_x_cnt = self.l_x_cnt
+        model.l_past = self.l_past
         
         model.u_lim = self.u_lim
         model.u_lim_idx = self.u_lim_idx
@@ -792,11 +847,11 @@ class System:
 
         model.Kx = self.Kx
         model.Ky = self.Ky
+        model.Kx_freq = self.Kx_freq
+        model.Ku_freq = self.Ku_freq
 
         model.l_past = self.l_past
-        model.Phi_l = self.Phi_l
         model.Fm = self.Fm
         model.Lt = self.Lt
-        model.Qw_bar = self.Qw_bar
         
         return model
