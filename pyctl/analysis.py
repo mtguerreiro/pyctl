@@ -20,21 +20,26 @@ def extract_settling_overshoot(
     """
     
     steady_state_value = v2
-    threshold = (settling_percentage / 100) * abs(steady_state_value - v1)  # Settling tolerance band
+    delta = abs(steady_state_value - v1)
+    threshold = (settling_percentage / 100) * delta  # Settling tolerance band
     lower_bound = steady_state_value - threshold
     upper_bound = steady_state_value + threshold
-    
+
     # Find the index where the signal settles within specified percentage and stays there
     settling_time_index = None
     for i in range(len(data)):
         if np.all((data[i:] >= lower_bound) & (data[i:] <= upper_bound)):
             settling_time_index = i
             break
-    
+
     # Calculate overshoot percentage
-    peak_value = np.min(data) if v2 < v1 else np.max(data)
-    overshoot_percentage = abs( (peak_value - steady_state_value) / (steady_state_value - v1) ) * 100
+    if v2 >= v1:
+        peak_value = np.max(data)
+    else:
+        peak_value = np.min(data)
     
+    overshoot_percentage = (abs(peak_value - steady_state_value) / delta) * 100
+
     return settling_time_index, overshoot_percentage
 
 
