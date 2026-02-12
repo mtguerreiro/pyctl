@@ -117,7 +117,7 @@ class Hildreth:
         
         # Matrices for Hildreth's QP procedure
         if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F) = self.hild_matrices(ref=ref, normalize=normalize)
         
         header = self.header(ftype=ftype, prefix=prefix)
 
@@ -140,7 +140,7 @@ class Hildreth:
         
         if (u_lim is not None) or (x_lim is not None):
             qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
-            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
+            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, ftype=ftype, prefix=prefix)
         else:
             qp_matrices = ''
             hild_matrices = ''
@@ -246,7 +246,12 @@ class Hildreth:
         DU1 = (-Ej_inv)[:m, :]
         DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
 
-        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
+        DU1_full = -Ej_inv
+        DU2_full = -Ej_inv @ self.model.M.T
+
+        F = self.model.F
+
+        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F)
 
 
     def header(self, ftype='src', prefix=None):
@@ -485,7 +490,7 @@ class Hildreth:
         return txt
     
 
-    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
+    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, ftype='src', prefix=None):
         
         if prefix is None:
             prefix = ''
@@ -523,9 +528,19 @@ class Hildreth:
         DU2_txt = nl + extern + 'float {:}DMPC_M_DU_2'.format(prefix)
         DU2_txt = _export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
 
+        DU1_full_txt = nl + extern + 'float {:}DMPC_M_DU_1_full'.format(prefix)
+        DU1_full_txt = _export_np_array_to_c(DU1_full, DU1_full_txt, fill=fill) + '\n'
+
+        DU2_full_txt = nl + extern + 'float {:}DMPC_M_DU_2_full'.format(prefix)
+        DU2_full_txt = _export_np_array_to_c(DU2_full, DU2_full_txt, fill=fill) + '\n'
+
+        F_txt = nl + extern + 'float {:}DMPC_F'.format(prefix)
+        F_txt = _export_np_array_to_c(F, F_txt, fill=fill) + '\n'
+        
         txt = comments + \
               Fj1_txt + Fj2_txt + Fx_txt +\
-              Kj1_txt + Hj_txt + DU1_txt + DU2_txt
+              Kj1_txt + Hj_txt + DU1_txt + DU2_txt +\
+              DU1_full_txt + DU2_full_txt + F_txt
         
         return txt
 
