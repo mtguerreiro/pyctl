@@ -75,7 +75,7 @@ class CDMPC:
         self.dll = ctypes.CDLL(dll)
         
         self.dll.cdmpc_py_step.argtypes = (
-                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
+                c_float_p, c_float_p, c_float_p, c_float_p, c_float_p, c_float_p
                 )
 
     def solve(self, xm, dx, xa, ui, r):
@@ -88,14 +88,15 @@ class CDMPC:
         xm_1 = xm_1.astype(np.float32)
         dx = dx.astype(np.float32)
         ui = ui.astype(np.float32)
-        r = r.astype(np.float32)        
-
+        r = r.astype(np.float32)
+        J = r.astype(np.float32)
+        
         du = np.zeros(ui.shape, dtype=np.float32)
 
         n_iters = self.dll.cdmpc_py_step(
             xm.ctypes.data_as(c_float_p), xm_1.ctypes.data_as(c_float_p),
             r.ctypes.data_as(c_float_p), ui.ctypes.data_as(c_float_p),
-            du.ctypes.data_as(c_float_p))
+            du.ctypes.data_as(c_float_p), J.ctypes.data_as(c_float_p))
         
         return du, n_iters
 

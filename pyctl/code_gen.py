@@ -117,7 +117,7 @@ class Hildreth:
         
         # Matrices for Hildreth's QP procedure
         if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F) = self.hild_matrices(ref=ref, normalize=normalize)
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, Phi) = self.hild_matrices(ref=ref, normalize=normalize)
         
         header = self.header(ftype=ftype, prefix=prefix)
 
@@ -140,7 +140,7 @@ class Hildreth:
         
         if (u_lim is not None) or (x_lim is not None):
             qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
-            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, ftype=ftype, prefix=prefix)
+            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, Phi, ftype=ftype, prefix=prefix)
         else:
             qp_matrices = ''
             hild_matrices = ''
@@ -250,8 +250,9 @@ class Hildreth:
         DU2_full = -Ej_inv @ self.model.M.T
 
         F = self.model.F
+        Phi = self.model.Phi
 
-        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F)
+        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, Phi)
 
 
     def header(self, ftype='src', prefix=None):
@@ -490,7 +491,7 @@ class Hildreth:
         return txt
     
 
-    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, ftype='src', prefix=None):
+    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, DU1_full, DU2_full, F, Phi, ftype='src', prefix=None):
         
         if prefix is None:
             prefix = ''
@@ -536,11 +537,14 @@ class Hildreth:
 
         F_txt = nl + extern + 'float {:}DMPC_F'.format(prefix)
         F_txt = _export_np_array_to_c(F, F_txt, fill=fill) + '\n'
+
+        Phi_txt = nl + extern + 'float {:}DMPC_Phi'.format(prefix)
+        Phi_txt = _export_np_array_to_c(Phi, Phi_txt, fill=fill) + '\n'
         
         txt = comments + \
               Fj1_txt + Fj2_txt + Fx_txt +\
               Kj1_txt + Hj_txt + DU1_txt + DU2_txt +\
-              DU1_full_txt + DU2_full_txt + F_txt
+              DU1_full_txt + DU2_full_txt + F_txt + Phi_txt
         
         return txt
 
