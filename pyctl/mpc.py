@@ -55,6 +55,57 @@ def aug(Am, Bm, Cm):
     return (A, B, C)
 
 
+def aug_delay(Am, Bm, Cm):
+    r"""Determines the augmented model.
+
+    Parameters
+    ----------
+    Am : np.array
+        An (n, n) numpy matrix.
+
+    Bm : np.array
+        An (n, m) numpy matrix.
+
+    Cm : np.array
+        A (q, n) numpy matrix.
+
+    Returns
+    -------
+    (A, B, C) : tuple
+        A tuple containing the augmented matrices.
+    
+    """
+    # Number of states
+    n = Am.shape[0]
+
+    # Number of inputs
+    if Bm.ndim == 1:
+        m = 1
+    else:
+        m = Bm.shape[1]
+
+    # Number of outputs
+    if Cm.ndim == 1:
+        q = 1
+    else:
+        q = Cm.shape[0]
+
+    A = np.zeros((m + n + q, m + n + q))
+    A[m:m+n, :m] = Bm
+    A[m:m+n, m:m+n] = Am
+    A[m+n:, :m] = Cm @ Bm
+    A[m+n:, m:m+n] = Cm @ Am
+    A[m+n:, m+n:] = np.eye(q)
+
+    B = np.zeros((m + n + q, m))
+    B[:m, :] = np.eye(m)
+
+    C = np.zeros((q, m + n + q))
+    C[:, m+n:] = np.eye(q)
+
+    return (A, B, C)
+
+
 def opt_matrices(A, B, C, lp, lc):
     r"""Computes the :math:`F` and :math:`Phi` matrices.
 
