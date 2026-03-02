@@ -56,7 +56,8 @@ def aug(Am, Bm, Cm):
 
 
 def aug_delay(Am, Bm, Cm):
-    r"""Determines the augmented model.
+    r"""Determines the augmented model for systems with a one-sample delay on
+    the input.
 
     Parameters
     ----------
@@ -233,7 +234,7 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
         :math:`B` matrix. An (n + q, m) numpy matrix.
 
     C : :class:`np.array`
-        :math:`C_m` matrix. A (q, n) numpy matrix.
+        :math:`C` matrix. A (q, n) numpy matrix.
 
     l_pred : :class:`int`
         Length of prediction horizon.
@@ -245,11 +246,6 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
         remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
         assumed.
 
-    n_ctn : :class:`NoneType`, :class:`int`
-        Lenght of the prediction horizon where the constraints are enforced.
-        Note that `n_ctn` is less than or equal to `l_ctl`. If set to `None`,
-        `n_ctn = l_ctl` is assumed.
-    
     rw : :class:`NoneType`, :class:`int`, :class:`np.array`
         Weighting factor for the control inputs.If set to `None`, `rw` is set
         to zero.
@@ -288,6 +284,72 @@ def opt_unc_gains(A, B, C, l_pred, l_ctl, rw):
     Ky = K @ Rs_bar
 
     return (Ky[:m], K_mpc[:m, :])
+
+
+def opt_unc_gains_delay(Am, Bm, Cm, l_pred, l_ctl, rw):
+    r"""Computes the optimum gains `Ky` and `K_mpc` for the unconstrained
+    closed-loop system, for systems with a one sample delay on the input.
+
+    Parameters
+    ----------
+    Am : :class:`np.array`
+        Model matrix :math:`Am`. An (n, n) numpy matrix.
+
+    Bm : :class:`np.array`
+        Model matrix :math:`Bm` matrix. An (n + q, m) numpy matrix.
+
+    Cm : :class:`np.array`
+        Model matrix :math:`Cm` matrix. A (q, n) numpy matrix.
+
+    l_pred : :class:`int`
+        Length of prediction horizon.
+
+    l_ctl : :class:`NoneType`, :class:`int`
+        Length of the prediction horizon where the control input increments
+        can be set. Note that `l_ctl` is less than or equal to `l_pred`. For
+        `l_ctl` less than `l_pred`, the increments are set zero to for the
+        remaining prediction steps. If set to `None`, `l_ctl = l_pred` is
+        assumed.
+    
+    rw : :class:`NoneType`, :class:`int`, :class:`np.array`
+        Weighting factor for the control inputs.If set to `None`, `rw` is set
+        to zero.
+
+    Returns
+    -------
+    (Ky, K_mpc) : :class:`tuple`
+        A tuple, containing two elements. The first element is the vector
+        `Ky` and the second element is the vector `K_mpc`.
+
+    """    
+    # Number of states
+    n = Am.shape[0]
+
+    # Number of inputs
+    if Bm.ndim == 1:
+        m = 1
+    else:
+        m = Bm.shape[1]
+
+    # Number of outputs
+    if Cm.ndim == 1:
+        q = 1
+    else:
+        q = Cm.shape[0]
+
+    R = control_weighting_matrix(rw, l_ctl)
+
+    A, B, C = pyctl.mpc.aug_delay(Am, Bm, Cm)
+    F, Phi = opt_matrices(A, B, C, l_pred, l_ctl)
+
+    Phi_t = Phi.T
+    
+    K = np.linalg.inv(Phi_t @ Phi + R) @ Phi_t @ F
+    Ku = K[0, :m]
+    Kx = K[0, m:m+n]
+    Ky = K[0, m+n:]
+
+    return (Kx, Ky, Ku)
 
 
 class System:
