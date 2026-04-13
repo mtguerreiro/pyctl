@@ -7,7 +7,8 @@ import osqp
 
 from dataclasses import dataclass, field
 
-from shutil import copytree, ignore_patterns
+import shutil
+
 import sys, os
 import subprocess
 import platform
@@ -39,20 +40,20 @@ def gen_py_cdmpc_dll(source_path):
     if not os.path.exists(cdmpc_py_build_dir):
         os.makedirs(cdmpc_py_build_dir)
 
-    copytree(source_path, cdmpc_py_dir, dirs_exist_ok=True)
+    shutil.copytree(source_path, cdmpc_py_dir, dirs_exist_ok=True)
 
     plat = platform.system()
 
+    subprocess.run(['cmake', '..', '-G', 'Ninja'], cwd=cdmpc_py_build_dir, check=True)
+
     if plat == 'Linux':
-        subprocess.run(['cmake', '..'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.so'
     elif plat == 'Windows':
-        subprocess.run(['cmake', '..', '-G', 'MinGW Makefiles'], cwd=cdmpc_py_build_dir, check=True)
         dll_path = cdmpc_py_build_dir + r'libcdmpc_py.dll'
     else:
         raise ValueError('Platform not supported for code generation.')
 
-    subprocess.run(['make'], cwd=cdmpc_py_build_dir, check=True)
+    subprocess.run(['ninja'], cwd=cdmpc_py_build_dir, check=True)
 
     return dll_path
 
@@ -82,10 +83,10 @@ class Hildreth:
         
         pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
         cdmpc_path = pyctl_root + r'/cdmpc/'
-        copytree(
+        shutil.copytree(
             cdmpc_path, file_path,
             dirs_exist_ok=True,
-            ignore=ignore_patterns('.git', '.gitignore')
+            ignore=shutil.ignore_patterns('.git', '.gitignore')
             )
             
         if prefix is None:
@@ -673,24 +674,32 @@ class OSQP:
             adaptive_rho=settings.adaptive_rho
         )
 
-        osqp_src_gen = file_path + r'/osqp_code_gen'
-        osqp_src_copy = file_path + r'/osqp'
+        osqp_src_gen = f'{file_path}/osqp_code_gen'
+        osqp_src_copy = f'{file_path}/osqp'
 
         prob.codegen(
             osqp_src_gen,
             parameters='vectors',
             force_rewrite=True,
-            FLOAT=True, LONG=False,
-            compile_python_ext=False
+            use_float=True
         )
 
-        copytree(
-            osqp_src_gen + r'/include', osqp_src_copy,
-            dirs_exist_ok=True, ignore=ignore_patterns('*qdldl_types.h')
+        shutil.copy(f'{osqp_src_gen}/osqp_configure.h', osqp_src_copy)
+        shutil.copy(f'{osqp_src_gen}/workspace.h', osqp_src_copy)        
+        shutil.copy(f'{osqp_src_gen}/workspace.c', osqp_src_copy)
+        
+        shutil.copytree(
+            f'{osqp_src_gen}/inc/private', osqp_src_copy,
+            dirs_exist_ok=True
         )
 
-        copytree(
-            osqp_src_gen + r'/src/osqp', osqp_src_copy,
+        shutil.copytree(
+            f'{osqp_src_gen}/inc/public', osqp_src_copy,
+            dirs_exist_ok=True
+        )
+        
+        shutil.copytree(
+            f'{osqp_src_gen}/src', osqp_src_copy,
             dirs_exist_ok=True
         )
 

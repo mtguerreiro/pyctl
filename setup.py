@@ -12,7 +12,6 @@ setup(
       'numpy',
       'scipy',
       'matplotlib',
-      'qpsolvers[quadprog]',
-      'osqp==0.6.7.post3',
+      'qpsolvers[quadprog, osqp]',
     ],
 )

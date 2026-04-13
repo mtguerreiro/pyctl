@@ -15,21 +15,24 @@ add_compile_options(
 
 add_library(
     ${PROJ}
-    SHARED 
-        cdmpc_py.c
-        cdmpc/dmpc.c
-        cdmpc/dmpc_matrices.c
-        cdmpc/mvops.c
-        cdmpc/qp.c
-        cdmpc/osqp/auxil.c
-        cdmpc/osqp/error.c
-        cdmpc/osqp/lin_alg.c
-        cdmpc/osqp/osqp.c
-        cdmpc/osqp/proj.c
-        cdmpc/osqp/qdldl.c
-        cdmpc/osqp/qdldl_interface.c
-        cdmpc/osqp/scaling.c
-        cdmpc/osqp/util.c
-        cdmpc/osqp/workspace.c
+    SHARED
+    cdmpc_py.c
+    cdmpc/dmpc.c
+    cdmpc/dmpc_matrices.c
+    cdmpc/mvops.c
+    cdmpc/qp.c
+    cdmpc/osqp/auxil.c
+    cdmpc/osqp/algebra_libs.c
+    cdmpc/osqp/csc_math.c
+    cdmpc/osqp/csc_utils.c
+    cdmpc/osqp/error.c
+    cdmpc/osqp/kkt.c
+    cdmpc/osqp/matrix.c
+    cdmpc/osqp/osqp_api.c
+    cdmpc/osqp/qdldl.c
+    cdmpc/osqp/qdldl_interface.c
+    cdmpc/osqp/scaling.c
+    cdmpc/osqp/util.c
+    cdmpc/osqp/vector.c
+    cdmpc/osqp/workspace.c
 )
-
