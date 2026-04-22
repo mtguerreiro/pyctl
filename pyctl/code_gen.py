@@ -683,10 +683,6 @@ class OSQP:
             force_rewrite=True,
             use_float=True
         )
-
-        shutil.copy(f'{osqp_src_gen}/osqp_configure.h', osqp_src_copy)
-        shutil.copy(f'{osqp_src_gen}/workspace.h', osqp_src_copy)        
-        shutil.copy(f'{osqp_src_gen}/workspace.c', osqp_src_copy)
         
         shutil.copytree(
             f'{osqp_src_gen}/inc/private', osqp_src_copy,
@@ -702,6 +698,10 @@ class OSQP:
             f'{osqp_src_gen}/src', osqp_src_copy,
             dirs_exist_ok=True
         )
+
+        shutil.copy(f'{osqp_src_gen}/osqp_configure.h', osqp_src_copy)
+        shutil.copy(f'{osqp_src_gen}/workspace.h', osqp_src_copy)        
+        shutil.copy(f'{osqp_src_gen}/workspace.c', osqp_src_copy)
 
         
     def gen_osqp_matrices(self, scaling=1.0):
