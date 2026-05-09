@@ -110,6 +110,30 @@ class Hildreth:
                 
         np.set_printoptions(floatmode='fixed', threshold=1000)
         
+
+    def gen_h_hls(self, file_path='', prefix=None, solver_settings=None):
+
+        if solver_settings is None:
+            solver_settings = self.settings
+            
+        if prefix is None:
+            file_prefix = ''
+        else:
+            file_prefix = prefix.lower() + '_'
+
+        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
+
+        src_txt = self.hild_matrix_hls_txt(self.model.Hj, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
+        header_txt = self.hild_matrix_hls_txt(self.model.Hj, ftype='header', prefix=prefix)
+
+        if file_path is not None:
+            with open(file_path + file_prefix + 'hild_data.cpp', 'w') as efile:
+                efile.write(src_txt)
+            with open(file_path + file_prefix + 'hild_data.h', 'w') as efile:
+                efile.write(header_txt)
+                
+        np.set_printoptions(floatmode='fixed', threshold=1000)
+
         
     def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None, normalize=False):
 
@@ -530,6 +554,45 @@ class Hildreth:
         
         return txt
 
+
+    def hild_matrix_hls_txt(self, Hj, file='hild_data', ftype='src', dtype='const hdata_t', prefix=None, normalize=False):
+        
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix.upper() + '_'
+
+        fill = True
+        extern = ''
+        nl = '\n'
+        if ftype == 'header':
+            fill = False
+            extern = 'extern '
+            nl = ''
+            def_guard_start = f"#ifndef {file.upper()}_H_\n#define {file.upper()}_H_\n\n"
+            def_guard_end = f"#endif /* #ifndef {file.upper()}_H_ */"
+            include = f'#include "hild_hls_config.h"\n\n'
+            define = f"#define HILD_SIZE_LAMBDA {Hj.shape[0]}\n\n"
+        else:
+            def_guard_start = ''
+            def_guard_end = ''
+            include = f'\n#include "{file}.h"\n\n'
+            define = ''
+
+        H = np.array(Hj)
+        Hd = -1.0 / np.array(H.diagonal())
+        np.fill_diagonal(H, 0)
+
+        H_txt = f"{extern}{dtype} H"
+        H_txt = _export_np_array_to_c(H, H_txt, fill=fill) + '\n\n'
+
+        Hd_txt = f"{extern}{dtype} Hd"
+        Hd_txt = _export_np_array_to_c(Hd, Hd_txt, fill=fill) + '\n\n'
+
+        txt = def_guard_start + include + define + H_txt + Hd_txt + def_guard_end
+        
+        return txt
+    
 
     def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
 
