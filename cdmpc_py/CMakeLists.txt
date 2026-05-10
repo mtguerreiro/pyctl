@@ -18,6 +18,7 @@ add_library(
     SHARED
     cdmpc_py.c
     cdmpc/dmpc.c
+    cdmpc/dmpc_data.c
     cdmpc/dmpc_matrices.c
     cdmpc/mvops.c
     cdmpc/qp.c
