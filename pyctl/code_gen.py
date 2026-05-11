@@ -123,7 +123,7 @@ class Hildreth:
 
         np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
 
-        src_txt = self.hild_matrix_hls_txt(self.model.Hj, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
+        src_txt = self.hild_matrix_hls_txt(self.model.Hj, ftype='src', prefix=prefix)
         header_txt = self.hild_matrix_hls_txt(self.model.Hj, ftype='header', prefix=prefix)
 
         if file_path is not None:
@@ -579,12 +579,12 @@ class Hildreth:
             include = f'\n#include "{file}.h"\n\n'
             define = ''
 
-        H = np.array(Hj)
-        Hd = -1.0 / np.array(H.diagonal())
-        np.fill_diagonal(H, 0)
+        Hd = -1.0 / np.array(Hj.diagonal())
+        Hn = Hj * Hd.reshape(-1, 1)
+        np.fill_diagonal(Hn, 0)
 
         H_txt = f"{extern}{dtype} H"
-        H_txt = _export_np_array_to_c(H, H_txt, fill=fill) + '\n\n'
+        H_txt = _export_np_array_to_c(Hn, H_txt, fill=fill) + '\n\n'
 
         Hd_txt = f"{extern}{dtype} Hd"
         Hd_txt = _export_np_array_to_c(Hd, Hd_txt, fill=fill) + '\n\n'
