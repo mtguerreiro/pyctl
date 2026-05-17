@@ -48,7 +48,6 @@ typedef struct{{
     uint32_t nu;
     uint32_t nd;
     uint32_t ny;
-    uint32_t n_lambda;
     uint32_t l_u_cnt;
     uint32_t n_x_cnt;
     uint32_t l_x_cnt;
@@ -71,22 +70,35 @@ typedef struct{{
     float Fj_1[{l_ctl * nu}][{ny}];
     float Fj_2[{l_ctl * nu}][{n_xa}];
     float Fx[{l_x_cnt * n_xm}][{n_xm}];
+    float xa[{n_xa}];
+    float dx[{n_xm}];
+    float e[{ny}];
+    float auxm1[{aux_size}];
+    float auxm2[{aux_size}];
+    int32_t (*solve)(float *);
+}}dmpc_data_t;
+
+typedef struct{{
+    uint32_t n_lambda;
     float Kj_1[{n_lambda}][{l_ctl * nu}];
     float Hj[{n_lambda}][{n_lambda}];
     float Kj[{n_lambda}];
     float lambda[{n_lambda}];
     float DU_1[{nu}][{l_ctl * nu}];
     float DU_2[{nu}][{n_lambda}];
-    float xa[{n_xa}];
-    float dx[{n_xm}];
-    float e[{ny}];
-    float auxm1[{aux_size}];
-    float auxm2[{aux_size}];
+    float aux[{n_lambda}];
+}}dmpc_hild_data_t;
+
+typedef struct{{
     float ldata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
     float udata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
-}}dmpc_data_t;
+}}dmpc_osqp_data_t;
 
 extern dmpc_data_t dmpc_data;
+
+extern dmpc_hild_data_t dmpc_hild_data;
+
+extern dmpc_osqp_data_t dmpc_osqp_data;
 
 #endif /* DMPC_DATA_H_ */
     """
@@ -105,6 +117,8 @@ def gen_dmpc_data_src(
     ):
     
     txt = f"""#include "dmpc_data.h"
+#include "dmpc_hild.h"
+#include "dmpc_osqp.h"
 
 /*
  * Matrices for QP solvers
@@ -128,7 +142,6 @@ dmpc_data_t dmpc_data = {{
   .nu = {nu},
   .nd = {nd},
   .ny = {ny},
-  .n_lambda = {n_lambda},
   .l_u_cnt = {l_u_cnt},
   .n_x_cnt = {n_x_cnt},
   .l_x_cnt = {l_x_cnt},
@@ -151,11 +164,18 @@ dmpc_data_t dmpc_data = {{
   .Fj_1 = {_np_array_to_c(Fj_1)},
   .Fj_2 = {_np_array_to_c(Fj_2)},
   .Fx = {_np_array_to_c(Fx)},
+  .solve = dmpc_hild_solve
+}};
+
+dmpc_hild_data_t dmpc_hild_data = {{
+  .n_lambda = {n_lambda},
   .Kj_1 = {_np_array_to_c(Kj_1)},
   .Hj = {_np_array_to_c(Hj)},
   .DU_1 = {_np_array_to_c(DU_1)},
   .DU_2 = {_np_array_to_c(DU_2)}
 }};
+
+dmpc_osqp_data_t dmpc_osqp_data;
     """
 
     return txt

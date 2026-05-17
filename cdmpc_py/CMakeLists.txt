@@ -17,10 +17,11 @@ add_library(
     ${PROJ}
     SHARED
     cdmpc_py.c
+    cdmpc/mvops.c
     cdmpc/dmpc.c
     cdmpc/dmpc_data.c
-    cdmpc/mvops.c
-    cdmpc/qp.c
+    cdmpc/dmpc_hild.c
+    cdmpc/dmpc_osqp.c
     cdmpc/osqp/auxil.c
     cdmpc/osqp/algebra_libs.c
     cdmpc/osqp/csc_math.c
