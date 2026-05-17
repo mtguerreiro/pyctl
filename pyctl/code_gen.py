@@ -25,7 +25,7 @@ def _np_array_to_c(a):
 def gen_dmpc_data_defs(
     n_xm, n_xa, ny, nu, nd,
     l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-    n_u_cnt, n_x_cnt
+    n_u_cnt, n_x_cnt, aux_size
     ):
 
     txt = f"""#ifndef DMPC_DATA_H_
@@ -42,54 +42,48 @@ def gen_dmpc_data_defs(
 #define DMPC_CONFIG_SOLVER_HILD
 #endif
 
-/* Number of model states and augmented states */
-#define DMPC_CONFIG_NXM                {n_xm}
-#define DMPC_CONFIG_NXA                {n_xa}
-
-/* Length of prediction, control and constraint horizons */
-#define DMPC_CONFIG_L_PRED             {l_pred}
-#define DMPC_CONFIG_L_CTL              {l_ctl}
-#define DMPC_CONFIG_L_U_CNT            {l_u_cnt}
-#define DMPC_CONFIG_L_X_CNT            {l_x_cnt}
-#define DMPC_CONFIG_NLAMBDA            {n_lambda}
-
-/* Number of inputs, outputs, and disturbances */
-#define DMPC_CONFIG_NU                 {nu}
-#define DMPC_CONFIG_NY                 {ny}
-#define DMPC_CONFIG_ND                 {nd}
-
-/* Size of control vector */
-#define DMPC_CONFIG_U_SIZE             (DMPC_CONFIG_L_CTL * DMPC_CONFIG_NU)
-
-/* Input constraints */
-#define DMPC_CONFIG_NU_CNT             {n_u_cnt}
-
-/* State constraints */
-#define DMPC_CONFIG_NXM_CNT            {n_x_cnt}
-
 typedef struct{{
-    float u_min[DMPC_CONFIG_NU_CNT];
-    float u_max[DMPC_CONFIG_NU_CNT];
-    uint32_t u_cnt_idx[DMPC_CONFIG_NU_CNT];
-    float x_min[DMPC_CONFIG_NXM_CNT];
-    float x_max[DMPC_CONFIG_NXM_CNT];
-    uint32_t x_cnt_idx[DMPC_CONFIG_NXM_CNT];
-    uint32_t y_idx[DMPC_CONFIG_NXM_CNT];
-    float A[DMPC_CONFIG_NXM][DMPC_CONFIG_NXM];
-    float B[DMPC_CONFIG_NXM][DMPC_CONFIG_NU+DMPC_CONFIG_ND];
-    float Kx[DMPC_CONFIG_NY][DMPC_CONFIG_NXM];
-    float Ky[DMPC_CONFIG_NY][DMPC_CONFIG_NY];
-    float Ej[DMPC_CONFIG_U_SIZE][DMPC_CONFIG_U_SIZE];
-    float Fj[DMPC_CONFIG_U_SIZE];
-    float M[2*((DMPC_CONFIG_NU_CNT*DMPC_CONFIG_L_U_CNT)+(DMPC_CONFIG_NXM_CNT*DMPC_CONFIG_L_X_CNT))][DMPC_CONFIG_U_SIZE];
-    float gam[2*((DMPC_CONFIG_NU_CNT*DMPC_CONFIG_L_U_CNT)+(DMPC_CONFIG_NXM_CNT*DMPC_CONFIG_L_X_CNT))];
-    float Fj_1[DMPC_CONFIG_U_SIZE][DMPC_CONFIG_NY];
-    float Fj_2[DMPC_CONFIG_U_SIZE][DMPC_CONFIG_NXA];
-    float Fx[DMPC_CONFIG_L_X_CNT * DMPC_CONFIG_NXM_CNT][DMPC_CONFIG_NXM];
-    float Kj_1[DMPC_CONFIG_NLAMBDA][DMPC_CONFIG_U_SIZE];
-    float Hj[DMPC_CONFIG_NLAMBDA][DMPC_CONFIG_NLAMBDA];
-    float DU_1[DMPC_CONFIG_NU][DMPC_CONFIG_U_SIZE];
-    float DU_2[DMPC_CONFIG_NU][DMPC_CONFIG_NLAMBDA];
+    uint32_t n_xm;
+    uint32_t n_xa;
+    uint32_t nu;
+    uint32_t nd;
+    uint32_t ny;
+    uint32_t n_lambda;
+    uint32_t l_u_cnt;
+    uint32_t n_x_cnt;
+    uint32_t l_x_cnt;
+    uint32_t u_size;
+    float u_min[{n_u_cnt}];
+    float u_max[{n_u_cnt}];
+    uint32_t u_cnt_idx[{n_u_cnt}];
+    float x_min[{n_x_cnt}];
+    float x_max[{n_x_cnt}];
+    uint32_t x_cnt_idx[{n_x_cnt}];
+    uint32_t y_idx[{ny}];
+    float A[{n_xm}][{n_xm}];
+    float B[{n_xm}][{nu + nd}];
+    float Kx[{ny}][{n_xm}];
+    float Ky[{ny}][{ny}];
+    float Ej[{l_ctl * nu}][{l_ctl * nu}];
+    float Fj[{l_ctl * nu}];
+    float M[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}][{l_ctl * nu}];
+    float gam[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}];
+    float Fj_1[{l_ctl * nu}][{ny}];
+    float Fj_2[{l_ctl * nu}][{n_xa}];
+    float Fx[{l_x_cnt * n_xm}][{n_xm}];
+    float Kj_1[{n_lambda}][{l_ctl * nu}];
+    float Hj[{n_lambda}][{n_lambda}];
+    float Kj[{n_lambda}];
+    float lambda[{n_lambda}];
+    float DU_1[{nu}][{l_ctl * nu}];
+    float DU_2[{nu}][{n_lambda}];
+    float xa[{n_xa}];
+    float dx[{n_xm}];
+    float e[{ny}];
+    float auxm1[{aux_size}];
+    float auxm2[{aux_size}];
+    float ldata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
+    float udata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
 }}dmpc_data_t;
 
 extern dmpc_data_t dmpc_data;
@@ -100,13 +94,16 @@ extern dmpc_data_t dmpc_data;
     return txt
 
 def gen_dmpc_data_src(
+    n_xm, n_xa, ny, nu, nd, n_lambda,
+    l_ctl, l_u_cnt,
+    l_x_cnt, n_x_cnt,
     u_min, u_max, u_cnt_idx,
     x_min, x_max, x_cnt_idx,
     y_idx,
     A, B, Kx, Ky, Ej, M,
     Fj_1, Fj_2, Fx, Kj_1, Hj, DU_1, DU_2
     ):
-
+    
     txt = f"""#include "dmpc_data.h"
 
 /*
@@ -126,6 +123,16 @@ def gen_dmpc_data_src(
  */
 
 dmpc_data_t dmpc_data = {{
+  .n_xm = {n_xm},
+  .n_xa = {n_xa},
+  .nu = {nu},
+  .nd = {nd},
+  .ny = {ny},
+  .n_lambda = {n_lambda},
+  .l_u_cnt = {l_u_cnt},
+  .n_x_cnt = {n_x_cnt},
+  .l_x_cnt = {l_x_cnt},
+  .u_size = {l_ctl * nu},
   .u_min = {_np_array_to_c(u_min)},
   .u_max = {_np_array_to_c(u_max)},
   .u_cnt_idx = {_np_array_to_c(u_cnt_idx)},
@@ -236,15 +243,11 @@ class Hildreth:
 
         np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
 
-        src_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
-        #header_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='header', prefix=prefix)
-        defs_txt = self._gen_defs(solver_settings, scaling=scaling, Bd=Bd, prefix=prefix)
+        src_txt, defs_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
 
         if file_path is not None:                
             with open(file_path + file_prefix + 'dmpc_data.c', 'w') as efile:
                 efile.write(src_txt)
-            #with open(file_path + file_prefix + 'dmpc_matrices.h', 'w') as efile:
-            #    efile.write(header_txt)
             with open(file_path + file_prefix + 'dmpc_data.h', 'w') as efile:
                 efile.write(defs_txt)
                 
@@ -255,63 +258,7 @@ class Hildreth:
 
         u_lim = self.model.u_lim
         x_lim = self.model.x_lim
-        
-        # Matrices for Hildreth's QP procedure
-        if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
-        
-        header = self.header(ftype=ftype, prefix=prefix)
 
-        includes, end = self.includes(ftype=ftype, prefix=prefix)
-
-        if u_lim is not None:
-            u_lim = u_lim / scaling
-        in_cnt = self.cnt(u_lim, self.model.u_lim_idx, cnt='input', ftype=ftype, prefix=prefix)
-
-        if x_lim is not None:
-            x_lim = x_lim / scaling
-
-        st_cnt = self.cnt(x_lim, self.model.x_lim_idx, cnt='state', ftype=ftype, prefix=prefix)
-        
-        out_idx = self.output_idx(self.model.y_idx, ftype=ftype, prefix=prefix)
-
-        pred_matrices = self.Am_Bm_matrices_pred(self.model.Am, self.model.Bm, Bd=Bd, ftype=ftype, prefix=prefix)
-
-        kx_ky_gains = self.Kx_Ky_gains(self.model.Kx, self.model.Ky, ftype=ftype, prefix=prefix)
-        
-        if (u_lim is not None) or (x_lim is not None):
-            qp_matrices = self.qp_matrices(self.model.Ej, self.model.M, ftype=ftype, prefix=prefix)
-            hild_matrices = self.hild_matrices_txt(Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype=ftype, prefix=prefix)
-        else:
-            qp_matrices = ''
-            hild_matrices = ''
-        
-##        txt = header + includes + in_cnt + st_cnt +\
-##              out_idx + pred_matrices + kx_ky_gains +\
-##              qp_matrices + hild_matrices +\
-##              end
-
-        if Bd is not None:
-            B = np.concatenate((self.model.Bm, Bd), axis=1)
-        else:
-            B = self.model.Bm
-            
-        txt = gen_dmpc_data_src(
-            u_lim[0], u_lim[1], self.model.u_lim_idx,
-            x_lim[0], x_lim[1], self.model.x_lim_idx,
-            self.model.y_idx,
-            self.model.Am, B, self.model.Kx, self.model.Ky, self.model.Ej, self.model.M,
-            Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2
-            )
-        
-        return txt
-
-
-    def _gen_defs(self, solver_settings, scaling=1.0, Bd=None, prefix=None):
-
-        x_lim = self.model.x_lim
-        u_lim = self.model.u_lim
-        
         n_xm = self.model.Am.shape[0]
         n_xa = self.model.A.shape[0]
         l_pred = self.model.l_pred
@@ -337,8 +284,10 @@ class Hildreth:
             nu = self.model.Bm.shape[1]
 
         if Bd is None:
+            B = self.model.Bm
             nd = 0
         else:
+            B = np.concatenate((self.model.Bm, Bd), axis=1)
             if Bd.ndim == 1:
                 nd = 1
             else:
@@ -351,21 +300,32 @@ class Hildreth:
         n_st_cnt = 0
         if self.model.x_lim_idx is not None:
             n_st_cnt = self.model.x_lim_idx.shape[0]
+        
+        # Matrices for Hildreth's QP procedure
+        if (u_lim is not None) or (x_lim is not None):
+            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
 
-        defs = gen_dmpc_data_defs(n_xm, n_xa, ny, nu, nd,
+        aux_size = max(n_xm, nu, n_lambda, Fx.shape[0], Fj1.shape[0])
+
+        src_txt = gen_dmpc_data_src(
+            n_xm, n_xa, ny, nu, nd, n_lambda,
+            l_ctl, l_u_cnt,
+            l_x_cnt, n_st_cnt,
+            u_lim[0], u_lim[1], self.model.u_lim_idx,
+            x_lim[0], x_lim[1], self.model.x_lim_idx,
+            self.model.y_idx,
+            self.model.Am, B, self.model.Kx, self.model.Ky, self.model.Ej, self.model.M,
+            Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2
+        )
+
+        defs_txt = gen_dmpc_data_defs(
+            n_xm, n_xa, ny, nu, nd,
             l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-            n_in_cnt, n_st_cnt)
-    
-##        defs = self.defs_header(
-##            n_xm, n_xa, ny, nu, nd,
-##            l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-##            n_in_cnt, n_st_cnt,
-##            solver_settings,
-##            scaling=scaling,
-##            prefix=prefix,
-##        )
-
-        return defs
+            n_in_cnt, n_st_cnt,
+            aux_size
+        )
+        
+        return src_txt, defs_txt
 
 
     def hild_matrices(self, ref='constant', normalize=False):
@@ -405,388 +365,6 @@ class Hildreth:
         DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
 
         return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
-
-
-    def header(self, ftype='src', prefix=None):
-
-        header = '/**\n'\
-         ' * @file {:}\n'\
-         ' * @brief Header with data to run the DMPC algorithm.\n'\
-         ' *\n'\
-         ' * This file is generated automatically and should not be modified.\n'\
-         ' *\n'\
-         ' * The Hj matrix is already generated by flipping the sign and inverting its\n'\
-         ' * diagonal elements, so that Hildreth\'s algorithm does not require any \n'\
-         ' * divisions.\n'\
-         ' *\n'\
-         ' */\n'
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix + '_'
-        
-        if ftype == 'src':
-            file = 'dmpc_matrices.c'
-        else:
-            file = 'dmpc_matrices.h'
-            
-        header = header.format(prefix + file)
-
-        return header
-
-
-    def includes(self, ftype='src', prefix=None):
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix + '_'
-
-        file = 'dmpc_matrices'
-
-        if ftype == 'src':
-            txt = '\n#include "{:}"\n'.format(prefix + file + '.h')
-            guard_end = ''
-        else:
-            def_guard = prefix.upper() + file.upper() + '_H_'
-            if prefix is not None: def_guard = def_guard
-
-            def_guard_txt = '#ifndef {:}\n'\
-                        '#define {:}\n'
-            def_guard_txt = def_guard_txt.format(def_guard, def_guard)   
-
-            include_header = '\n#include "stdint.h"\n'
-
-            txt = '\n' + def_guard_txt + include_header
-
-            guard_end = '\n#endif /* {:} */\n'.format(def_guard)
-
-        return txt, guard_end
-
-
-    def cnt(self, lim, idx, scaling=1.0, cnt='input', ftype='src', prefix=None):
-
-        if lim is None:
-            return ''
-        
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        extern = ''
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-
-        cnt_txt = 'DMPC_CONFIG_U'
-        comment = '/* Input constraints */\n'
-        if cnt != 'input':
-            cnt_txt = 'DMPC_CONFIG_XM'
-            comment = '/* State constraints */\n'
-        
-        min_txt = extern + 'float {:}{:}_MIN'.format(prefix, cnt_txt)
-        max_txt = extern + 'float {:}{:}_MAX'.format(prefix, cnt_txt)
-        lim_idx_txt = extern + 'uint32_t {:}{:}_LIM_IDX'.format(prefix, cnt_txt)
-
-        min_txt = _export_np_array_to_c(lim[0] / scaling, min_txt, fill=fill) + '\n'
-        max_txt = _export_np_array_to_c(lim[1] / scaling, max_txt, fill=fill) + '\n'
-        lim_idx_txt = _export_np_array_to_c(idx, lim_idx_txt, fill=fill) + '\n'
-
-        txt = '\n' + comment + min_txt + max_txt + lim_idx_txt
-        
-        return txt
-
-
-    def output_idx(self, idx, ftype='src', prefix=None):
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        extern = ''
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-
-        comment = '/* Index of ouputs */\n'
-        y_idx_txt = extern + 'uint32_t {:}DMPC_CONFIG_Y_IDX'.format(prefix)
-
-        idx_txt = _export_np_array_to_c(idx, y_idx_txt, fill=fill) + '\n'
-
-        txt = '\n' + comment + idx_txt
-        
-        return txt
-
-
-    def Am_Bm_matrices_pred(self, Am, Bm, Bd=None, ftype='src', prefix=None):
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        nl = '\n'
-        extern = ''
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-            nl = ''
-
-        if Bd is not None:
-            B = np.concatenate((Bm, Bd), axis=1)
-        else:
-            B = Bm
-        
-        comment = '/*\n'\
-                  ' * A and B matrices for prediction.\n'\
-                  ' * A corresponds to model matrix Am.\n'\
-                  ' * B corresponds to model matrix Bm concatenated with Bd, if Bd exists.\n'\
-                  '*/\n'
-
-        A_txt = extern + 'float {:}DMPC_M_A'.format(prefix)
-        B_txt = extern + 'float {:}DMPC_M_B'.format(prefix)
-
-        A_txt = _export_np_array_to_c(Am, A_txt, fill=fill) + '\n'
-        B_txt = _export_np_array_to_c(B, B_txt, fill=fill) + '\n'
-
-        txt = '\n' + comment + A_txt + nl + B_txt
-        
-        return txt
-
-
-    def Kx_Ky_gains(self, Kx, Ky, ftype='src', prefix=None):
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        nl = '\n'
-        extern = ''
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-            nl = ''
-        
-        comment = '/* Optimal Kx and Ky for unconstrained problems */\n'
-
-        Kx_txt = extern + 'float {:}DMPC_Kx'.format(prefix)
-        Ky_txt = extern + 'float {:}DMPC_Ky'.format(prefix)
-
-        Kx_txt = _export_np_array_to_c(Kx, Kx_txt, fill=fill) + '\n'
-        Ky_txt = _export_np_array_to_c(Ky, Ky_txt, fill=fill) + '\n'
-
-        txt = '\n' + comment + Kx_txt + nl + Ky_txt
-        
-        return txt
-    
-
-    def qp_matrices(self, Ej, M, ftype='src', prefix=None):
-
-        n = Ej.shape[0]
-        m = M.shape[0]
-        
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        extern = ''
-        nl = '\n'
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-            nl = ''
-
-        comment = '\n/*\n * Matrices for QP solvers \n'\
-                   ' *\n'\
-                   ' * The matrices were generated considering the following problem:\n'\
-                   ' *\n'\
-                   ' * min (1/2) * DU\' * Ej * DU + DU\' * Fj\n'\
-                   ' * DU\n'\
-                   ' *\n'\
-                   ' * s.t. M * DU <= gam\n'\
-                   ' *\n'\
-                   ' * The (1/2) term in from of DU\' * Ej * DU needs to be considered in the QP\n'\
-                   ' * solver selected, or the solution will appear to be inconsistent.\n'\
-                   ' * Note that the Fj and gam matrices are usually updated online, while Ej\n'\
-                   ' * and M are static.\n'\
-                   ' */\n'
-
-        Ej_txt = extern + 'float {:}DMPC_M_Ej'.format(prefix)
-        Fj_txt = nl + extern + 'float {:}DMPC_M_Fj'.format(prefix)
-
-        M_txt = nl + extern + 'float {:}DMPC_M_M'.format(prefix)
-        gam_txt = nl + extern + 'float {:}DMPC_M_gam'.format(prefix)
-
-        # Generates dummy matrices for Fj and gam, since they are updated
-        # at every iteration.
-        Fj = np.zeros(n)
-        gam = np.zeros(m)
-        
-        Ej_txt = _export_np_array_to_c(Ej, Ej_txt, fill=fill) + '\n'
-        Fj_txt = _export_np_array_to_c(Fj, Fj_txt, fill=False) + '\n'
-
-        M_txt = _export_np_array_to_c(M, M_txt, fill=fill) + '\n'
-        gam_txt = _export_np_array_to_c(gam, gam_txt, fill=False) + '\n'
-
-        txt = comment + Ej_txt + Fj_txt + M_txt + gam_txt
-
-        return txt
-    
-
-    def hild_matrices_txt(self, Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2, ftype='src', prefix=None):
-        
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix.upper() + '_'
-
-        fill = True
-        extern = ''
-        nl = '\n'
-        if ftype != 'src':
-            fill = False
-            extern = 'extern '
-            nl = ''
-
-        comments = '\n/* Matrices for Hildreth\'s QP procedure */\n'
-        
-        Fj1_txt = extern + 'float {:}DMPC_M_Fj_1'.format(prefix)
-        Fj1_txt = _export_np_array_to_c(Fj1, Fj1_txt, fill=fill) + '\n'
-        
-        Fj2_txt = nl + extern + 'float {:}DMPC_M_Fj_2'.format(prefix)
-        Fj2_txt = _export_np_array_to_c(Fj2, Fj2_txt, fill=fill) + '\n'
-        
-        Fx_txt = nl + extern + 'float {:}DMPC_M_Fx'.format(prefix)
-        Fx_txt = _export_np_array_to_c(Fx, Fx_txt, fill=fill) + '\n'
-        
-        Kj1_txt = nl + extern + 'float {:}DMPC_M_Kj_1'.format(prefix)
-        Kj1_txt = _export_np_array_to_c(Kj1, Kj1_txt, fill=fill) + '\n'
-        
-        Hj_txt = nl + extern + 'float {:}DMPC_M_Hj'.format(prefix)
-        Hj_txt = _export_np_array_to_c(Hj, Hj_txt, fill=fill) + '\n'
-        
-        DU1_txt = nl + extern + 'float {:}DMPC_M_DU_1'.format(prefix)
-        DU1_txt = _export_np_array_to_c(DU1, DU1_txt, fill=fill) + '\n'
-        
-        DU2_txt = nl + extern + 'float {:}DMPC_M_DU_2'.format(prefix)
-        DU2_txt = _export_np_array_to_c(DU2, DU2_txt, fill=fill) + '\n'
-
-        txt = comments + \
-              Fj1_txt + Fj2_txt + Fx_txt +\
-              Kj1_txt + Hj_txt + DU1_txt + DU2_txt
-        
-        return txt
-
-
-    def defs_header(self, n_xm, n_xa, ny, nu, nd, l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda, nu_cnt, n_st_cnt, solver_settings, scaling=1.0, prefix=None):
-
-        header = '/**\n'\
-         ' * @file {:}\n'\
-         ' * @brief Header with definitions to aid the DMPC algorithm.\n'\
-         ' *\n'\
-         ' * This file is generated automatically and should not be modified.\n'\
-         ' *\n'\
-         ' */\n'
-
-        if prefix is None:
-            prefix = ''
-        else:
-            prefix = prefix + '_'
-
-        tab_size = len(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER')
-        tab = '{{:<{:}}}'.format(tab_size + 4)
-        
-        file = prefix + 'dmpc_defs'
-        
-        header = header.format(file + '.h')
-
-        def_guard = file.upper() + '_H_'
-
-        def_guard_txt = '\n#ifndef {:}\n'\
-                    '#define {:}\n'
-        def_guard_txt = def_guard_txt.format(def_guard, def_guard)
-
-        guard_end_txt = '\n#endif /* {:} */\n'.format(def_guard)
-
-        scale_def = (tab + '{:f}f').format(prefix.upper() + 'DMPC_CONFIG_SCALE', scaling)
-        scale_txt = '\n/* Scaling factor */\n'\
-                     '#define {:}\n'.format(scale_def)
-
-        n_xm_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM', n_xm)
-        n_xa_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXA', n_xa)
-        n_states_txt = '\n/* Number of model states and augmented states */\n'+\
-                       '#define {:}\n'.format(n_xm_def)+\
-                       '#define {:}\n'.format(n_xa_def)
-
-        l_pred_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_PRED', l_pred)
-        l_ctl_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_CTL', l_ctl)
-        l_u_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_U_CNT', l_u_cnt)
-        l_x_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_L_X_CNT', l_x_cnt)
-        n_lambda_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NLAMBDA', n_lambda)
-
-        n_hor_txt = '\n/* Length of prediction, control and constraint horizons */\n'+\
-                    '#define {:}\n'.format(l_pred_def)+\
-                    '#define {:}\n'.format(l_ctl_def)+\
-                    '#define {:}\n'.format(l_u_cnt_def)+\
-                    '#define {:}\n'.format(l_x_cnt_def)+\
-                    '#define {:}\n'.format(n_lambda_def)
-
-
-        n_in_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NU', nu)
-        n_out_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NY', ny)
-        n_dist_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_ND', nd)
-        n_in_out_txt = '\n/* Number of inputs, outputs, and disturbances */\n'+\
-                       '#define {:}\n'.format(n_in_def)+\
-                       '#define {:}\n'.format(n_out_def)+\
-                       '#define {:}\n'.format(n_dist_def)
-
-        l_ctl_def = prefix.upper() + 'DMPC_CONFIG_L_CTL'
-        nu_def = prefix.upper() + 'DMPC_CONFIG_NU'
-        size_u = tab.format(prefix.upper() + 'DMPC_CONFIG_U_SIZE') + '({:} * {:})'.format(l_ctl_def, nu_def)
-        n_size_u_txt = '\n/* Size of control vector */\n'+\
-                       '#define {:}\n'.format(size_u)
-
-        n_input_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NU_CNT', nu_cnt)
-        n_input_cnt_txt = '\n/* Input constraints */\n'+\
-                          '#define {:}\n'.format(n_input_cnt_def)
-
-        n_st_cnt_def = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_NXM_CNT', n_st_cnt)
-        n_st_cnt_txt = '\n/* State constraints */\n'+\
-                          '#define {:}\n'.format(n_st_cnt_def)
-
-        hild_tol = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_TOL', solver_settings.tol)
-        hild_n_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_N_ITER', solver_settings.max_iter)
-        hfi = 1 if solver_settings.fixed_iter is True else 0
-        hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', hfi)
-
-        solver_guard = '\n#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)\n'\
-                       '#define DMPC_CONFIG_SOLVER_HILD\n'\
-                       '#endif\n'
-
-        solver_txt = '\n/* Solver settings */\n' +\
-                     '#define {:}\n'.format(hild_tol)+\
-                     '#define {:}\n'.format(hild_n_iter)+\
-                     '#define {:}\n'.format(hild_fixed_iter)+\
-                     solver_guard
-        
-        defs_txt = header + def_guard_txt +\
-                   scale_txt +\
-                   n_states_txt + n_hor_txt + n_in_out_txt +\
-                   n_size_u_txt + n_input_cnt_txt + n_st_cnt_txt +\
-                   solver_txt +\
-                   guard_end_txt
-        
-        return defs_txt
 
 
 @dataclass
