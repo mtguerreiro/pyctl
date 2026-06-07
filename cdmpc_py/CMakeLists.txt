@@ -19,21 +19,22 @@ add_library(
     cdmpc_py.c
     cdmpc/mvops.c
     cdmpc/dmpc.c
-    cdmpc/dmpc_data.c
+    # cdmpc/dmpc_data.c
     cdmpc/dmpc_hild.c
-    cdmpc/dmpc_osqp.c
-    cdmpc/osqp/auxil.c
-    cdmpc/osqp/algebra_libs.c
-    cdmpc/osqp/csc_math.c
-    cdmpc/osqp/csc_utils.c
-    cdmpc/osqp/error.c
-    cdmpc/osqp/kkt.c
-    cdmpc/osqp/matrix.c
-    cdmpc/osqp/osqp_api.c
-    cdmpc/osqp/qdldl.c
-    cdmpc/osqp/qdldl_interface.c
-    cdmpc/osqp/scaling.c
-    cdmpc/osqp/util.c
-    cdmpc/osqp/vector.c
-    cdmpc/osqp/workspace.c
+    cdmpc/dmpc_data_hild.c
+    # cdmpc/dmpc_osqp.c
+    # cdmpc/osqp/auxil.c
+    # cdmpc/osqp/algebra_libs.c
+    # cdmpc/osqp/csc_math.c
+    # cdmpc/osqp/csc_utils.c
+    # cdmpc/osqp/error.c
+    # cdmpc/osqp/kkt.c
+    # cdmpc/osqp/matrix.c
+    # cdmpc/osqp/osqp_api.c
+    # cdmpc/osqp/qdldl.c
+    # cdmpc/osqp/qdldl_interface.c
+    # cdmpc/osqp/scaling.c
+    # cdmpc/osqp/util.c
+    # cdmpc/osqp/vector.c
+    # cdmpc/osqp/workspace.c
 )
