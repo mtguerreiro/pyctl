@@ -169,6 +169,10 @@ dmpc_data_t dmpc_data = {{
 }};
 
 dmpc_hild_data_t dmpc_hild_data = {{
+  .fixed_iter = 1,
+  .n_iter = 200,
+  .tol = 1e-6,
+  .max_iter = 200,
   .n_lambda = {n_lambda},
   .Kj_1 = (float *)Kj_1,
   .Hj = (float *)Hj,

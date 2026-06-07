@@ -7,7 +7,7 @@ int cdmpc_py_step(float *xm, float *xm_1,
                   float *r, float *u_1,
                   float *du){
     
-    uint32_t n_iters;
+    int status;
 
     inst.prob_data->x = xm;
     inst.prob_data->x_1 = xm_1;
@@ -16,7 +16,9 @@ int cdmpc_py_step(float *xm, float *xm_1,
     inst.prob_data->du = du;
 
     /* Optimization */
-    dmpcOpt(&inst);
+    status = dmpcOpt(&inst);
 
-    return inst.prob_data->n_iters;
+    if( status == 0 ) status = (int) inst.prob_data->n_iters;
+
+    return status;
 }
