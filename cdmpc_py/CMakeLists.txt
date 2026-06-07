@@ -21,7 +21,7 @@ add_library(
     cdmpc/dmpc.c
     # cdmpc/dmpc_data.c
     cdmpc/dmpc_hild.c
-    cdmpc/dmpc_data_hild.c
+    cdmpc/dmpc_inst_data.c
     # cdmpc/dmpc_osqp.c
     # cdmpc/osqp/auxil.c
     # cdmpc/osqp/algebra_libs.c

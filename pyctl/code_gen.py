@@ -13,6 +13,27 @@ import sys, os
 import subprocess
 import platform
 
+"""
+Documentation todo:
+- explain the problem that is solved, e.g.
+
+/*
+ * Matrices for QP solvers
+ *
+ * The matrices were generated considering the following problem:
+ *
+ * min (1/2) * DU' * Ej * DU + DU' * Fj
+ * DU
+ *
+ * s.t. M * DU <= gam
+ *
+ * The (1/2) term in from of DU' * Ej * DU needs to be considered in the QP
+ * solver selected, or the solution will appear to be inconsistent.
+ * Note that the Fj and gam matrices are usually updated online, while Ej
+ * and M are static.
+ */
+ 
+"""
 
 def _np_array_to_c(a):
 
@@ -28,28 +49,14 @@ def gen_dmpc_data_defs(
     n_u_cnt, n_x_cnt, aux_size
     ):
 
-    txt = f"""#ifndef DMPC_DATA_HILD_
-#define DMPC_DATA_HILD_
+    txt = f"""#ifndef DMPC_INST_DATA_
+#define DMPC_INST_DATA_
 
 #include "dmpc_data.h"
-#include "stdint.h"
-
-/* Solver settings */
-#define DMPC_CONFIG_HILD_TOL           1e-06
-#define DMPC_CONFIG_HILD_N_ITER        200
-#define DMPC_CONFIG_HILD_FIXED_ITER    1
-
-#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)
-#define DMPC_CONFIG_SOLVER_HILD
-#endif
 
 extern dmpc_inst_t inst;
 
-//extern dmpc_data_t dmpc_data;
-
-//extern dmpc_hild_data_t dmpc_hild_data;
-
-#endif /* DMPC_DATA_H_ */
+#endif /* DMPC_INST_DATA_H_ */
     """
 
     return txt
@@ -66,10 +73,8 @@ def gen_dmpc_data_src(
     aux_size
     ):
     
-    txt = f"""#include "dmpc_data_hild.h"
+    txt = f"""#include "dmpc_inst_data.h"
 #include "dmpc_hild.h"
-//#include "dmpc_osqp.h"
-#include "stdint.h"
 
 static float x[{n_xm}] = {{0.0f}};
 static float x_1[{n_xm}] = {{0.0f}};
@@ -111,22 +116,6 @@ static float lambda[{n_lambda}] = {{0.0f}};
 static float DU_1[{nu}][{l_ctl * nu}] = {_np_array_to_c(DU_1)};
 static float DU_2[{nu}][{n_lambda}] = {_np_array_to_c(DU_2)};
 static float aux[{n_lambda}] = {{0.0f}};
-
-/*
- * Matrices for QP solvers
- *
- * The matrices were generated considering the following problem:
- *
- * min (1/2) * DU' * Ej * DU + DU' * Fj
- * DU
- *
- * s.t. M * DU <= gam
- *
- * The (1/2) term in from of DU' * Ej * DU needs to be considered in the QP
- * solver selected, or the solution will appear to be inconsistent.
- * Note that the Fj and gam matrices are usually updated online, while Ej
- * and M are static.
- */
 
 dmpc_data_t dmpc_data = {{
   .x = x,
@@ -189,7 +178,6 @@ dmpc_inst_t inst = {{
     .solve = dmpc_hild_solve
 }};
 
-//dmpc_osqp_data_t dmpc_osqp_data;
     """
 
     return txt
@@ -443,9 +431,9 @@ class Hildreth:
         src_txt, defs_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
 
         if file_path is not None:                
-            with open(file_path + file_prefix + 'dmpc_data_hild.c', 'w') as efile:
+            with open(file_path + file_prefix + 'dmpc_inst_data.c', 'w') as efile:
                 efile.write(src_txt)
-            with open(file_path + file_prefix + 'dmpc_data_hild.h', 'w') as efile:
+            with open(file_path + file_prefix + 'dmpc_inst_data.h', 'w') as efile:
                 efile.write(defs_txt)
                 
         np.set_printoptions(floatmode='fixed', threshold=1000)

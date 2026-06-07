@@ -1,7 +1,7 @@
 
 #include <stdint.h>
 #include "cdmpc/dmpc.h"
-#include "cdmpc/dmpc_data_hild.h"
+#include "cdmpc/dmpc_inst_data.h"
 
 int cdmpc_py_step(float *xm, float *xm_1, 
                   float *r, float *u_1,
