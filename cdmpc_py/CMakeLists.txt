@@ -7,6 +7,8 @@ project(${PROJ})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED True)
 
+add_compile_definitions(DAQP_SINGLE_PRECISION)
+
 add_compile_options(
     -Wall
     -Wextra
@@ -21,6 +23,7 @@ add_library(
     cdmpc/dmpc_matrices.c
     cdmpc/mvops.c
     cdmpc/qp.c
+
     cdmpc/osqp/auxil.c
     cdmpc/osqp/algebra_libs.c
     cdmpc/osqp/csc_math.c
@@ -35,4 +38,14 @@ add_library(
     cdmpc/osqp/util.c
     cdmpc/osqp/vector.c
     cdmpc/osqp/workspace.c
+
+    cdmpc/daqp/api.c
+    cdmpc/daqp/auxiliary.c
+    cdmpc/daqp/avi.c
+    cdmpc/daqp/bnb.c
+    cdmpc/daqp/daqp.c
+    cdmpc/daqp/daqp_prox.c
+    cdmpc/daqp/factorization.c
+    cdmpc/daqp/hierarchical.c
+    cdmpc/daqp/utils.c
 )

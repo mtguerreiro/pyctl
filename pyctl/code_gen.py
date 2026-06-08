@@ -457,8 +457,21 @@ class Hildreth:
 
     def qp_matrices(self, Ej, M, ftype='src', prefix=None):
 
+        nu = self.model.Bm.shape[1]
         n = Ej.shape[0]
         m = M.shape[0]
+
+        l_u_cnt = self.model.l_u_cnt
+        l_x_cnt = self.model.l_x_cnt
+        nx_cnt = self.model.x_lim.shape[1] if self.model.x_lim is not None else 0
+                
+        bounds_size = round( self.model.M.shape[0] / 2 )
+        lin_cost_size = self.model.Ej.shape[0]            
+        A = np.zeros([bounds_size, lin_cost_size])
+        A[:(nu * l_u_cnt), :] = self.model.M[ nu * l_u_cnt : 2 * (nu * l_u_cnt), : ]
+        A[(nu * l_u_cnt):, :] = self.model.M[ (2 * nu * l_u_cnt + nx_cnt * l_x_cnt):, : ]
+            
+        M2 = A
         
         if prefix is None:
             prefix = ''
@@ -492,6 +505,7 @@ class Hildreth:
         Fj_txt = nl + extern + 'float {:}DMPC_M_Fj'.format(prefix)
 
         M_txt = nl + extern + 'float {:}DMPC_M_M'.format(prefix)
+        M2_txt = nl + extern + 'float {:}DMPC_M_M2'.format(prefix)
         gam_txt = nl + extern + 'float {:}DMPC_M_gam'.format(prefix)
 
         # Generates dummy matrices for Fj and gam, since they are updated
@@ -503,9 +517,10 @@ class Hildreth:
         Fj_txt = _export_np_array_to_c(Fj, Fj_txt, fill=False) + '\n'
 
         M_txt = _export_np_array_to_c(M, M_txt, fill=fill) + '\n'
+        M2_txt = _export_np_array_to_c(M2, M2_txt, fill=fill) + '\n'
         gam_txt = _export_np_array_to_c(gam, gam_txt, fill=False) + '\n'
 
-        txt = comment + Ej_txt + Fj_txt + M_txt + gam_txt
+        txt = comment + Ej_txt + Fj_txt + M_txt + M2_txt + gam_txt
 
         return txt
     
@@ -676,7 +691,7 @@ class Hildreth:
         hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', hfi)
 
         solver_guard = '\n#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)\n'\
-                       '#define DMPC_CONFIG_SOLVER_HILD\n'\
+                       '#define DMPC_CONFIG_SOLVER_OSQP\n'\
                        '#endif\n'
 
         solver_txt = '\n/* Solver settings */\n' +\
