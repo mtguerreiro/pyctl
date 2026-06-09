@@ -691,7 +691,7 @@ class Hildreth:
         hild_fixed_iter = (tab + '{:}').format(prefix.upper() + 'DMPC_CONFIG_HILD_FIXED_ITER', hfi)
 
         solver_guard = '\n#if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)\n'\
-                       '#define DMPC_CONFIG_SOLVER_OSQP\n'\
+                       '#define DMPC_CONFIG_SOLVER_HILD\n'\
                        '#endif\n'
 
         solver_txt = '\n/* Solver settings */\n' +\
@@ -850,6 +850,10 @@ def _export_np_array_to_c(arr, arr_name, fill=True):
         
     return arr_txt
 
+
+@dataclass
+class DAQP_Solver_Settings:
+    max_iter : int = 10
     
 @dataclass
 class CodeGenData:
