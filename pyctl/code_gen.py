@@ -67,7 +67,9 @@ def gen_dmpc_prob_data(model, Bd=None, ref='constant'):
     else:
         Fj1 = -self.model.Phi.T
     Fj2 = model.Phi.T @ model.F
-        
+
+    Fx = model.Mx_aux @ model.Fx
+
     u_lim = model.u_lim
     x_lim = model.x_lim
 
@@ -111,7 +113,7 @@ def gen_dmpc_prob_data(model, Bd=None, ref='constant'):
     if model.x_lim_idx is not None:
         n_x_cnt = model.x_lim_idx.shape[0]
 
-    aux_size = max(n_xm, nu, model.Fx.shape[0], Fj1.shape[0])
+    aux_size = max(n_xm, nu, Fx.shape[0], Fj1.shape[0])
             
     txt = f"""
 static float x[{n_xm}] = {{0.0f}};
@@ -140,7 +142,7 @@ static float M[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}][{l_ctl * nu}] = {_
 static float gam[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}] = {{0.0f}};
 static float Fj_1[{l_ctl * nu}][{ny}] = {_np_array_to_c(Fj1)};
 static float Fj_2[{l_ctl * nu}][{n_xa}] = {_np_array_to_c(Fj2)};
-static float Fx[{l_x_cnt * n_xm}][{n_xm}] = {_np_array_to_c(model.Fx)};
+static float Fx[{l_x_cnt * n_xm}][{n_xm}] = {_np_array_to_c(Fx)};
 static float xa[{n_xa}] = {{0.0f}};
 static float dx[{n_xm}] = {{0.0f}};
 static float e[{ny}] = {{0.0f}};
