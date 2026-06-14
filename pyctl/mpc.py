@@ -676,15 +676,15 @@ class System:
         return results
 
     
-    def export(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', gen_dll=False, solver_settings=None):
+    def export(self, file_path='', Bd=None, ref='constant', gen_dll=False, solver=None):
         
         model = self._get_code_gen_model()
         pyctl.code_gen.gen(
             model,
-            file_path=file_path, prefix=prefix,
-            scaling=scaling, Bd=Bd,
+            file_path=file_path,
+            Bd=Bd,
             ref=ref,
-            solver_settings=solver_settings
+            solver=solver
         )
 
         if gen_dll:

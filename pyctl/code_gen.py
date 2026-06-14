@@ -43,7 +43,8 @@ def _np_array_to_c(a):
 
     return a_cstr
 
-def gen_dmpc_data_defs(inst=None):
+
+def dmpc_prob_defs(inst=None):
 
     if inst is None:
         inst = 'inst'
@@ -60,12 +61,13 @@ extern dmpc_inst_t {inst};
 
     return txt
 
-def gen_dmpc_prob_data(model, Bd=None, ref='constant'):
+
+def dmpc_prob_data_txt(model, Bd=None, ref='constant'):
 
     if ref == 'constant':
         Fj1 = -model.Phi.T @ model.Rs_bar
     else:
-        Fj1 = -self.model.Phi.T
+        Fj1 = -model.Phi.T
     Fj2 = model.Phi.T @ model.F
 
     Fx = model.Mx_aux @ model.Fx
@@ -188,46 +190,17 @@ dmpc_data_t dmpc_data = {{
   .auxm1 = auxm1,
   .auxm2 = auxm2
 }};
-"""
-    return txt
-
-def gen_dmpc_solver_data(model, Kj_1, Hj, DU_1, DU_2):
-
-    n_lambda = model.M.shape[0]
-    l_ctl = model.l_ctl
-    if model.Bm.ndim == 1:
-        nu = 1
-    else:
-        nu = model.Bm.shape[1]
-        
-    txt = f"""
-static float Kj_1[{n_lambda}][{l_ctl * nu}] = {_np_array_to_c(Kj_1)};
-static float Hj[{n_lambda}][{n_lambda}] = {_np_array_to_c(Hj)};
-static float Kj[{n_lambda}] = {{0.0f}};
-static float lambda[{n_lambda}] = {{0.0f}};
-static float DU_1[{nu}][{l_ctl * nu}] = {_np_array_to_c(DU_1)};
-static float DU_2[{nu}][{n_lambda}] = {_np_array_to_c(DU_2)};
-static float aux[{n_lambda}] = {{0.0f}};
-
-dmpc_hild_data_t dmpc_hild_data = {{
-  .fixed_iter = 1,
-  .n_iter = 200,
-  .tol = 1e-6,
-  .max_iter = 200,
-  .n_lambda = {n_lambda},
-  .Kj_1 = (float *)Kj_1,
-  .Hj = (float *)Hj,
-  .Kj = Kj,
-  .lambda = lambda,
-  .DU_1 = (float *)DU_1,
-  .DU_2 = (float *)DU_2,
-  .aux = aux
-}};
-"""
+    """
     return txt
 
 
-def gen_dmpc_src(prob_txt, solver_txt):
+def dmpc_prob_src_txt(model, Bd=None, ref='constant', solver=None):
+
+    if solver is None:
+        solver = Hildreth()
+    
+    prob_txt = dmpc_prob_data_txt(model, Bd=Bd, ref=ref)
+    solver_txt = solver._data_txt(model, ref=ref)
     
     txt = f"""#include "dmpc_inst_data.h"
 #include "dmpc_hild.h"
@@ -238,25 +211,34 @@ def gen_dmpc_src(prob_txt, solver_txt):
 
 dmpc_inst_t inst = {{
     .prob_data = &dmpc_data,
-    .solver_data = (void *)&dmpc_hild_data,
-    .solve = dmpc_hild_solve
+    .solver_data = (void *)&{solver._solver_data},
+    .solve = {solver._solve}
 }};
 
     """
-
     return txt
 
 
-def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', solver_settings=None):
+def gen(model, file_path='', Bd=None, ref='constant', solver=None):
 
-    if solver_settings is None:
-        solver_settings = Solver_Settings()
-    
-    _hild = Hildreth(model, settings=solver_settings.hild)
-    _hild.gen(file_path=file_path, prefix=prefix, scaling=scaling, Bd=Bd, ref=ref)
+    pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
+    cdmpc_path = f"{pyctl_root}/cdmpc/"
+    shutil.copytree(
+        cdmpc_path, file_path,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns('.git', '.gitignore')
+    )
 
-    _osqp = OSQP(model, settings=solver_settings.osqp)
-    _osqp.gen(file_path=file_path, scaling=scaling)
+    with np.printoptions(floatmode='unique', threshold=sys.maxsize):
+
+        src_txt = dmpc_prob_src_txt(model, Bd=Bd, ref=ref, solver=solver)
+        defs_txt = dmpc_prob_defs()
+        
+        if file_path is not None:                
+            with open(f"{file_path}/dmpc_inst_data.c", 'w') as efile:
+                efile.write(src_txt)
+            with open(f"{file_path}/dmpc_inst_data.h", 'w') as efile:
+                efile.write(defs_txt)
 
 
 def gen_py_cdmpc_dll(source_path):
@@ -292,109 +274,78 @@ def gen_py_cdmpc_dll(source_path):
 
 
 @dataclass
-class Hildreth_Solver_Settings:
+class Hildreth:
     tol : float = 1e-6
     max_iter : int = 200
     fixed_iter : bool = True
     normalize_h: bool = False
+    _solver_data : str = 'dmpc_hild_data'
+    _solve : str = 'dmpc_hild_solve'
 
-class Hildreth:
+    def _data_txt(self, model, ref='constant'):
 
-    def __init__(self, model, settings=None):
-
-        if settings is None:
-            settings = Hildreth_Solver_Settings()
-
-        self.settings = settings
-        self.model = model
-
-
-    def gen(self, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', solver_settings=None):
-
-        if solver_settings is None:
-            solver_settings = self.settings
+        (Kj_1, Hj, DU_1, DU_2) = self._matrices(model, ref=ref)
         
-        pyctl_root = os.path.dirname( os.path.dirname(pyctl.__file__) )
-        cdmpc_path = pyctl_root + r'/cdmpc/'
-        shutil.copytree(
-            cdmpc_path, file_path,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns('.git', '.gitignore')
-            )
-            
-        if prefix is None:
-            file_prefix = ''
+        fixed_iter = 1 if self.fixed_iter is True else 0
+
+        n_lambda = model.M.shape[0]
+        l_ctl = model.l_ctl
+        if model.Bm.ndim == 1:
+            nu = 1
         else:
-            file_prefix = prefix.lower() + '_'
+            nu = model.Bm.shape[1]
+            
+        txt = f"""
+static float Kj_1[{n_lambda}][{l_ctl * nu}] = {_np_array_to_c(Kj_1)};
+static float Hj[{n_lambda}][{n_lambda}] = {_np_array_to_c(Hj)};
+static float Kj[{n_lambda}] = {{0.0f}};
+static float lambda[{n_lambda}] = {{0.0f}};
+static float DU_1[{nu}][{l_ctl * nu}] = {_np_array_to_c(DU_1)};
+static float DU_2[{nu}][{n_lambda}] = {_np_array_to_c(DU_2)};
+static float aux[{n_lambda}] = {{0.0f}};
 
-        np.set_printoptions(floatmode='unique', threshold=sys.maxsize)
+dmpc_hild_data_t dmpc_hild_data = {{
+  .fixed_iter = {fixed_iter},
+  .n_iter = {self.max_iter},
+  .tol = {self.tol}f,
+  .n_lambda = {n_lambda},
+  .Kj_1 = (float *)Kj_1,
+  .Hj = (float *)Hj,
+  .Kj = Kj,
+  .lambda = lambda,
+  .DU_1 = (float *)DU_1,
+  .DU_2 = (float *)DU_2,
+  .aux = aux
+}};
+    """
+        return txt
+    
+    def _matrices(self, model, ref='constant'):
 
-        src_txt, defs_txt = self._gen(scaling=scaling, Bd=Bd, ref=ref, ftype='src', prefix=prefix, normalize=solver_settings.normalize_h)
-
-        if file_path is not None:                
-            with open(file_path + file_prefix + 'dmpc_inst_data.c', 'w') as efile:
-                efile.write(src_txt)
-            with open(file_path + file_prefix + 'dmpc_inst_data.h', 'w') as efile:
-                efile.write(defs_txt)
-                
-        np.set_printoptions(floatmode='fixed', threshold=1000)
+        Ej_inv = np.linalg.inv(model.Ej)
         
-        
-    def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None, normalize=False):
-
-        
-        # Matrices for Hildreth's QP procedure
-        if (self.model.u_lim is not None) or (self.model.x_lim is not None):
-            (Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
-
-        prob_txt = gen_dmpc_prob_data(self.model, Bd=Bd)
-        solver_txt = gen_dmpc_solver_data(self.model, Kj1, Hj, DU1, DU2)
-
-        src_txt = gen_dmpc_src(prob_txt, solver_txt)
-        
-##        src_txt = gen_dmpc_data_src(
-##            n_xm, n_xa, ny, nu, nd, n_lambda,
-##            l_pred, l_ctl, l_u_cnt, l_x_cnt,
-##            n_in_cnt, n_st_cnt,
-##            u_lim[0], u_lim[1], self.model.u_lim_idx,
-##            x_lim[0], x_lim[1], self.model.x_lim_idx,
-##            self.model.y_idx,
-##            self.model.Am, B, self.model.Kx, self.model.Ky, self.model.Ej, self.model.M,
-##            Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2,
-##            aux_size
-##        )
-
-        defs_txt = gen_dmpc_data_defs()
-        
-        return src_txt, defs_txt
-
-
-    def hild_matrices(self, ref='constant', normalize=False):
-
-        Ej_inv = np.linalg.inv(self.model.Ej)
-        
-        if self.model.Bm.ndim == 1:
+        if model.Bm.ndim == 1:
             m = 1
         else:
-            m = self.model.Bm.shape[1]
+            m = model.Bm.shape[1]
         
-        Kj1 = self.model.M @ Ej_inv
+        Kj_1 = model.M @ Ej_inv
 
-        if normalize == True:
-            Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
-            Hj[:] = self.Hj[:]
+        if self.normalize_h == True:
+            Hj = np.zeros(Hj.shape, dtype=Hj.dtype)
+            Hj[:] = Hj[:]
             Hj_aux = Hj.copy()
             np.fill_diagonal(Hj_aux, 1)
             Hj = np.linalg.inv(-np.diag(np.diag(Hj))) @ Hj_aux
         else:
-            Hj = np.zeros(self.model.Hj.shape, dtype=self.model.Hj.dtype)
-            Hj[:] = self.model.Hj[:]
+            Hj = np.zeros(model.Hj.shape, dtype=model.Hj.dtype)
+            Hj[:] = model.Hj[:]
             Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
 
-        DU1 = (-Ej_inv)[:m, :]
-        DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
+        DU_1 = (-Ej_inv)[:m, :]
+        DU_2 = (-Ej_inv @ model.M.T)[:m, :]
 
-        return (Kj1, Hj, DU1, DU2)
+        return (Kj_1, Hj, DU_1, DU_2)
 
 
 @dataclass
@@ -510,34 +461,6 @@ class OSQP:
         return (P, q, A, l, u)
 
 
-def _export_np_array_to_c(arr, arr_name, fill=True):
-
-    if arr.ndim == 1:
-        n = arr.shape[0]
-        m = 1
-    else:
-        if (arr.shape[0] == 1) or (arr.shape[1] == 1):
-            arr = arr.flatten()
-            n = arr.shape[0]
-            m = 1
-        else:
-            n, m = arr.shape
-
-    arr_str = np.array2string(arr, separator=',')
-    arr_str = arr_str.replace('[', '{')
-    arr_str = arr_str.replace(']', '}')
-
-    if m == 1:
-        arr_txt = '{:}[{:}];'.format(arr_name, n)
-    else:
-        arr_txt = '{:}[{:}][{:}];'.format(arr_name, n, m)
-
-    if fill is True:
-        arr_txt = arr_txt[:-1] + ' = {:};'.format(arr_str)
-        
-    return arr_txt
-
-    
 @dataclass
 class CodeGenData:
 
@@ -579,9 +502,3 @@ class CodeGenData:
 
     Kx : np.ndarray
     Ky : np.ndarray
-
-
-@dataclass
-class Solver_Settings:
-    hild : Hildreth_Solver_Settings = field(default_factory=Hildreth_Solver_Settings)
-    osqp : OSQP_Solver_Settings = field(default_factory=OSQP_Solver_Settings)
