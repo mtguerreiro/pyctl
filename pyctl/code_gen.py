@@ -43,79 +43,109 @@ def _np_array_to_c(a):
 
     return a_cstr
 
-def gen_dmpc_data_defs(
-    n_xm, n_xa, ny, nu, nd,
-    l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-    n_u_cnt, n_x_cnt, aux_size
-    ):
+def gen_dmpc_data_defs(inst=None):
 
-    txt = f"""#ifndef DMPC_INST_DATA_
-#define DMPC_INST_DATA_
+    if inst is None:
+        inst = 'inst'
+    
+    txt = f"""#ifndef DMPC_{inst.upper()}_DATA_
+#define DMPC_{inst.upper()}_DATA_
 
 #include "dmpc_data.h"
 
-extern dmpc_inst_t inst;
+extern dmpc_inst_t {inst};
 
-#endif /* DMPC_INST_DATA_H_ */
+#endif /* DMPC_{inst.upper()}_DATA_H_ */
     """
 
     return txt
 
-def gen_dmpc_data_src(
-    n_xm, n_xa, ny, nu, nd, n_lambda,
-    l_pred, l_ctl, l_u_cnt, l_x_cnt,
-    n_u_cnt, n_x_cnt,
-    u_min, u_max, u_cnt_idx,
-    x_min, x_max, x_cnt_idx,
-    y_idx,
-    A, B, Kx, Ky, Ej, M,
-    Fj_1, Fj_2, Fx, Kj_1, Hj, DU_1, DU_2,
-    aux_size
-    ):
-    
-    txt = f"""#include "dmpc_inst_data.h"
-#include "dmpc_hild.h"
+def gen_dmpc_prob_data(model, Bd=None, ref='constant'):
 
+    if ref == 'constant':
+        Fj1 = -model.Phi.T @ model.Rs_bar
+    else:
+        Fj1 = -self.model.Phi.T
+    Fj2 = model.Phi.T @ model.F
+        
+    u_lim = model.u_lim
+    x_lim = model.x_lim
+
+    n_xm = model.Am.shape[0]
+    n_xa = model.A.shape[0]
+    l_pred = model.l_pred
+    l_ctl = model.l_ctl
+
+    if (x_lim is not None) or (u_lim is not None):
+        l_u_cnt = model.l_u_cnt
+        l_x_cnt = model.l_x_cnt
+    else:
+        l_u_cnt = 0
+        l_x_cnt = 0
+
+    if model.Cm.ndim == 1:
+        ny = 1
+    else:
+        ny = model.Cm.shape[0]
+    
+    if model.Bm.ndim == 1:
+        nu = 1
+    else:
+        nu = model.Bm.shape[1]
+
+    if Bd is None:
+        B = model.Bm
+        nd = 0
+    else:
+        B = np.concatenate((model.Bm, Bd), axis=1)
+        if Bd.ndim == 1:
+            nd = 1
+        else:
+            nd = Bd.shape[1]
+
+    n_u_cnt = 0
+    if model.u_lim_idx is not None:
+        n_u_cnt = model.u_lim_idx.shape[0]
+
+    n_x_cnt = 0
+    if model.x_lim_idx is not None:
+        n_x_cnt = model.x_lim_idx.shape[0]
+
+    aux_size = max(n_xm, nu, model.Fx.shape[0], Fj1.shape[0])
+            
+    txt = f"""
 static float x[{n_xm}] = {{0.0f}};
 static float x_1[{n_xm}] = {{0.0f}};
 static float r[{ny}] = {{0.0f}};
 static float u_1[{nu+nd}] = {{0.0f}};
 static float du[{nu+nd}] = {{0.0f}};
 
-static float u_min[{n_u_cnt}] = {_np_array_to_c(u_min)};
-static float u_max[{n_u_cnt}] = {_np_array_to_c(u_max)};
-static uint32_t u_cnt_idx[{n_u_cnt}] = {_np_array_to_c(u_cnt_idx)};
+static float u_min[{n_u_cnt}] = {_np_array_to_c(model.u_lim[0])};
+static float u_max[{n_u_cnt}] = {_np_array_to_c(model.u_lim[1])};
+static uint32_t u_cnt_idx[{n_u_cnt}] = {_np_array_to_c(model.u_lim_idx)};
 
-static float x_min[{n_x_cnt}] = {_np_array_to_c(x_min)};
-static float x_max[{n_x_cnt}] = {_np_array_to_c(x_max)};
-static uint32_t x_cnt_idx[{n_x_cnt}] = {_np_array_to_c(x_cnt_idx)};
+static float x_min[{n_x_cnt}] = {_np_array_to_c(model.x_lim[0])};
+static float x_max[{n_x_cnt}] = {_np_array_to_c(model.x_lim[1])};
+static uint32_t x_cnt_idx[{n_x_cnt}] = {_np_array_to_c(model.x_lim_idx)};
 
-static uint32_t y_idx[{ny}] = {_np_array_to_c(y_idx)};
+static uint32_t y_idx[{ny}] = {_np_array_to_c(model.y_idx)};
 
-static float A[{n_xm}][{n_xm}] = {_np_array_to_c(A)};
+static float A[{n_xm}][{n_xm}] = {_np_array_to_c(model.Am)};
 static float B[{n_xm}][{nu + nd}] = {_np_array_to_c(B)};
-static float Kx[{ny}][{n_xm}] = {_np_array_to_c(Kx)};
-static float Ky[{ny}][{ny}] = {_np_array_to_c(Ky)};
-static float Ej[{l_ctl * nu}][{l_ctl * nu}] = {_np_array_to_c(Ej)};
+static float Kx[{ny}][{n_xm}] = {_np_array_to_c(model.Kx)};
+static float Ky[{ny}][{ny}] = {_np_array_to_c(model.Ky)};
+static float Ej[{l_ctl * nu}][{l_ctl * nu}] = {_np_array_to_c(model.Ej)};
 static float Fj[{l_ctl * nu}] = {{0.0f}};
-static float M[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}][{l_ctl * nu}] = {_np_array_to_c(M)};
+static float M[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}][{l_ctl * nu}] = {_np_array_to_c(model.M)};
 static float gam[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}] = {{0.0f}};
-static float Fj_1[{l_ctl * nu}][{ny}] = {_np_array_to_c(Fj_1)};
-static float Fj_2[{l_ctl * nu}][{n_xa}] = {_np_array_to_c(Fj_2)};
-static float Fx[{l_x_cnt * n_xm}][{n_xm}] = {_np_array_to_c(Fx)};
+static float Fj_1[{l_ctl * nu}][{ny}] = {_np_array_to_c(Fj1)};
+static float Fj_2[{l_ctl * nu}][{n_xa}] = {_np_array_to_c(Fj2)};
+static float Fx[{l_x_cnt * n_xm}][{n_xm}] = {_np_array_to_c(model.Fx)};
 static float xa[{n_xa}] = {{0.0f}};
 static float dx[{n_xm}] = {{0.0f}};
 static float e[{ny}] = {{0.0f}};
 static float auxm1[{aux_size}] = {{0.0f}};
 static float auxm2[{aux_size}] = {{0.0f}};
-
-static float Kj_1[{n_lambda}][{l_ctl * nu}] = {_np_array_to_c(Kj_1)};
-static float Hj[{n_lambda}][{n_lambda}] = {_np_array_to_c(Hj)};
-static float Kj[{n_lambda}] = {{0.0f}};
-static float lambda[{n_lambda}] = {{0.0f}};
-static float DU_1[{nu}][{l_ctl * nu}] = {_np_array_to_c(DU_1)};
-static float DU_2[{nu}][{n_lambda}] = {_np_array_to_c(DU_2)};
-static float aux[{n_lambda}] = {{0.0f}};
 
 dmpc_data_t dmpc_data = {{
   .x = x,
@@ -156,6 +186,26 @@ dmpc_data_t dmpc_data = {{
   .auxm1 = auxm1,
   .auxm2 = auxm2
 }};
+"""
+    return txt
+
+def gen_dmpc_solver_data(model, Kj_1, Hj, DU_1, DU_2):
+
+    n_lambda = model.M.shape[0]
+    l_ctl = model.l_ctl
+    if model.Bm.ndim == 1:
+        nu = 1
+    else:
+        nu = model.Bm.shape[1]
+        
+    txt = f"""
+static float Kj_1[{n_lambda}][{l_ctl * nu}] = {_np_array_to_c(Kj_1)};
+static float Hj[{n_lambda}][{n_lambda}] = {_np_array_to_c(Hj)};
+static float Kj[{n_lambda}] = {{0.0f}};
+static float lambda[{n_lambda}] = {{0.0f}};
+static float DU_1[{nu}][{l_ctl * nu}] = {_np_array_to_c(DU_1)};
+static float DU_2[{nu}][{n_lambda}] = {_np_array_to_c(DU_2)};
+static float aux[{n_lambda}] = {{0.0f}};
 
 dmpc_hild_data_t dmpc_hild_data = {{
   .fixed_iter = 1,
@@ -171,6 +221,18 @@ dmpc_hild_data_t dmpc_hild_data = {{
   .DU_2 = (float *)DU_2,
   .aux = aux
 }};
+"""
+    return txt
+
+
+def gen_dmpc_src(prob_txt, solver_txt):
+    
+    txt = f"""#include "dmpc_inst_data.h"
+#include "dmpc_hild.h"
+
+{prob_txt}
+
+{solver_txt}
 
 dmpc_inst_t inst = {{
     .prob_data = &dmpc_data,
@@ -182,170 +244,7 @@ dmpc_inst_t inst = {{
 
     return txt
 
-##def gen_dmpc_data_defs(
-##    n_xm, n_xa, ny, nu, nd,
-##    l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-##    n_u_cnt, n_x_cnt, aux_size
-##    ):
-##
-##    txt = f"""#ifndef DMPC_DATA_H_
-###define DMPC_DATA_H_
-##
-###include "stdint.h"
-##
-##/* Solver settings */
-###define DMPC_CONFIG_HILD_TOL           1e-06
-###define DMPC_CONFIG_HILD_N_ITER        200
-###define DMPC_CONFIG_HILD_FIXED_ITER    1
-##
-###if !defined(DMPC_CONFIG_SOLVER_HILD) && !defined(DMPC_CONFIG_SOLVER_OSQP)
-###define DMPC_CONFIG_SOLVER_HILD
-###endif
-##
-##typedef struct{{
-##    float x[{n_xm}];
-##    float x_1[{n_xm}];
-##    float r[{ny}];
-##    float u_1[{nu+nd}];
-##    uint32_t n_iters;
-##    uint32_t n_xm;
-##    uint32_t n_xa;
-##    uint32_t nu;
-##    uint32_t nd;
-##    uint32_t ny;
-##    uint32_t l_u_cnt;
-##    uint32_t n_x_cnt;
-##    uint32_t l_x_cnt;
-##    uint32_t u_size;
-##    float u_min[{n_u_cnt}];
-##    float u_max[{n_u_cnt}];
-##    uint32_t u_cnt_idx[{n_u_cnt}];
-##    float x_min[{n_x_cnt}];
-##    float x_max[{n_x_cnt}];
-##    uint32_t x_cnt_idx[{n_x_cnt}];
-##    uint32_t y_idx[{ny}];
-##    float A[{n_xm}][{n_xm}];
-##    float B[{n_xm}][{nu + nd}];
-##    float Kx[{ny}][{n_xm}];
-##    float Ky[{ny}][{ny}];
-##    float Ej[{l_ctl * nu}][{l_ctl * nu}];
-##    float Fj[{l_ctl * nu}];
-##    float M[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}][{l_ctl * nu}];
-##    float gam[{2 * (l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt)}];
-##    float Fj_1[{l_ctl * nu}][{ny}];
-##    float Fj_2[{l_ctl * nu}][{n_xa}];
-##    float Fx[{l_x_cnt * n_xm}][{n_xm}];
-##    float xa[{n_xa}];
-##    float dx[{n_xm}];
-##    float e[{ny}];
-##    float auxm1[{aux_size}];
-##    float auxm2[{aux_size}];
-##    int32_t (*solve)(float *);
-##}}dmpc_data_t;
-##
-##typedef struct{{
-##    uint32_t n_lambda;
-##    float Kj_1[{n_lambda}][{l_ctl * nu}];
-##    float Hj[{n_lambda}][{n_lambda}];
-##    float Kj[{n_lambda}];
-##    float lambda[{n_lambda}];
-##    float DU_1[{nu}][{l_ctl * nu}];
-##    float DU_2[{nu}][{n_lambda}];
-##    float aux[{n_lambda}];
-##}}dmpc_hild_data_t;
-##
-##typedef struct{{
-##    float ldata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
-##    float udata[{l_u_cnt * n_u_cnt + l_x_cnt * n_x_cnt}];
-##}}dmpc_osqp_data_t;
-##
-##extern dmpc_data_t dmpc_data;
-##
-##extern dmpc_hild_data_t dmpc_hild_data;
-##
-##extern dmpc_osqp_data_t dmpc_osqp_data;
-##
-###endif /* DMPC_DATA_H_ */
-##    """
-##
-##    return txt
-##
-##def gen_dmpc_data_src(
-##    n_xm, n_xa, ny, nu, nd, n_lambda,
-##    l_ctl, l_u_cnt,
-##    l_x_cnt, n_x_cnt,
-##    u_min, u_max, u_cnt_idx,
-##    x_min, x_max, x_cnt_idx,
-##    y_idx,
-##    A, B, Kx, Ky, Ej, M,
-##    Fj_1, Fj_2, Fx, Kj_1, Hj, DU_1, DU_2
-##    ):
-##    
-##    txt = f"""#include "dmpc_data.h"
-###include "dmpc_hild.h"
-###include "dmpc_osqp.h"
-##
-##/*
-## * Matrices for QP solvers
-## *
-## * The matrices were generated considering the following problem:
-## *
-## * min (1/2) * DU' * Ej * DU + DU' * Fj
-## * DU
-## *
-## * s.t. M * DU <= gam
-## *
-## * The (1/2) term in from of DU' * Ej * DU needs to be considered in the QP
-## * solver selected, or the solution will appear to be inconsistent.
-## * Note that the Fj and gam matrices are usually updated online, while Ej
-## * and M are static.
-## */
-##
-##dmpc_data_t dmpc_data = {{
-##  .n_xm = {n_xm},
-##  .n_xa = {n_xa},
-##  .nu = {nu},
-##  .nd = {nd},
-##  .ny = {ny},
-##  .l_u_cnt = {l_u_cnt},
-##  .n_x_cnt = {n_x_cnt},
-##  .l_x_cnt = {l_x_cnt},
-##  .u_size = {l_ctl * nu},
-##  .u_min = {_np_array_to_c(u_min)},
-##  .u_max = {_np_array_to_c(u_max)},
-##  .u_cnt_idx = {_np_array_to_c(u_cnt_idx)},
-##  .x_min = {_np_array_to_c(x_min)},
-##  .x_max = {_np_array_to_c(x_max)},
-##  .x_cnt_idx = {_np_array_to_c(x_cnt_idx)},
-##  .y_idx = {_np_array_to_c(y_idx)},
-##  .A = {_np_array_to_c(A)},
-##  .B = {_np_array_to_c(B)},
-##  .Kx = {_np_array_to_c(Kx)},
-##  .Ky = {_np_array_to_c(Ky)},
-##  .Ej = {_np_array_to_c(Ej)},
-##  .Fj = {{0}},
-##  .M = {_np_array_to_c(M)},
-##  .gam = {{0}},
-##  .Fj_1 = {_np_array_to_c(Fj_1)},
-##  .Fj_2 = {_np_array_to_c(Fj_2)},
-##  .Fx = {_np_array_to_c(Fx)},
-##  .solve = dmpc_hild_solve
-##}};
-##
-##dmpc_hild_data_t dmpc_hild_data = {{
-##  .n_lambda = {n_lambda},
-##  .Kj_1 = {_np_array_to_c(Kj_1)},
-##  .Hj = {_np_array_to_c(Hj)},
-##  .DU_1 = {_np_array_to_c(DU_1)},
-##  .DU_2 = {_np_array_to_c(DU_2)}
-##}};
-##
-##dmpc_osqp_data_t dmpc_osqp_data;
-##    """
-##
-##    return txt
-    
-    
+
 def gen(model, file_path='', prefix=None, scaling=1.0, Bd=None, ref='constant', solver_settings=None):
 
     if solver_settings is None:
@@ -441,75 +340,29 @@ class Hildreth:
         
     def _gen(self, scaling=1.0, Bd=None, ref='constant', ftype='src', prefix=None, normalize=False):
 
-        u_lim = self.model.u_lim
-        x_lim = self.model.x_lim
-
-        n_xm = self.model.Am.shape[0]
-        n_xa = self.model.A.shape[0]
-        l_pred = self.model.l_pred
-        l_ctl = self.model.l_ctl
-
-        if (x_lim is not None) or (u_lim is not None):
-            l_u_cnt = self.model.l_u_cnt
-            l_x_cnt = self.model.l_x_cnt
-            n_lambda = self.model.M.shape[0]
-        else:
-            l_u_cnt = 0
-            l_x_cnt = 0
-            n_lambda = 0
-
-        if self.model.Cm.ndim == 1:
-            ny = 1
-        else:
-            ny = self.model.Cm.shape[0]
-        
-        if self.model.Bm.ndim == 1:
-            nu = 1
-        else:
-            nu = self.model.Bm.shape[1]
-
-        if Bd is None:
-            B = self.model.Bm
-            nd = 0
-        else:
-            B = np.concatenate((self.model.Bm, Bd), axis=1)
-            if Bd.ndim == 1:
-                nd = 1
-            else:
-                nd = Bd.shape[1]
-
-        n_in_cnt = 0
-        if self.model.u_lim_idx is not None:
-            n_in_cnt = self.model.u_lim_idx.shape[0]
-
-        n_st_cnt = 0
-        if self.model.x_lim_idx is not None:
-            n_st_cnt = self.model.x_lim_idx.shape[0]
         
         # Matrices for Hildreth's QP procedure
-        if (u_lim is not None) or (x_lim is not None):
-            (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
+        if (self.model.u_lim is not None) or (self.model.x_lim is not None):
+            (Kj1, Hj, DU1, DU2) = self.hild_matrices(ref=ref, normalize=normalize)
 
-        aux_size = max(n_xm, nu, n_lambda, Fx.shape[0], Fj1.shape[0])
+        prob_txt = gen_dmpc_prob_data(self.model, Bd=Bd)
+        solver_txt = gen_dmpc_solver_data(self.model, Kj1, Hj, DU1, DU2)
 
-        src_txt = gen_dmpc_data_src(
-            n_xm, n_xa, ny, nu, nd, n_lambda,
-            l_pred, l_ctl, l_u_cnt, l_x_cnt,
-            n_in_cnt, n_st_cnt,
-            u_lim[0], u_lim[1], self.model.u_lim_idx,
-            x_lim[0], x_lim[1], self.model.x_lim_idx,
-            self.model.y_idx,
-            self.model.Am, B, self.model.Kx, self.model.Ky, self.model.Ej, self.model.M,
-            Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2,
-            aux_size
-        )
+        src_txt = gen_dmpc_src(prob_txt, solver_txt)
+        
+##        src_txt = gen_dmpc_data_src(
+##            n_xm, n_xa, ny, nu, nd, n_lambda,
+##            l_pred, l_ctl, l_u_cnt, l_x_cnt,
+##            n_in_cnt, n_st_cnt,
+##            u_lim[0], u_lim[1], self.model.u_lim_idx,
+##            x_lim[0], x_lim[1], self.model.x_lim_idx,
+##            self.model.y_idx,
+##            self.model.Am, B, self.model.Kx, self.model.Ky, self.model.Ej, self.model.M,
+##            Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2,
+##            aux_size
+##        )
 
-        defs_txt = gen_dmpc_data_defs(
-            n_xm, n_xa, ny, nu, nd,
-            l_pred, l_ctl, l_u_cnt, l_x_cnt, n_lambda,
-            n_in_cnt, n_st_cnt,
-            aux_size
-        )
+        defs_txt = gen_dmpc_data_defs()
         
         return src_txt, defs_txt
 
@@ -523,18 +376,7 @@ class Hildreth:
         else:
             m = self.model.Bm.shape[1]
         
-        if ref == 'constant':
-            Fj1 = -self.model.Phi.T @ self.model.Rs_bar
-        else:
-            Fj1 = -self.model.Phi.T
-        Fj2 = self.model.Phi.T @ self.model.F
-
         Kj1 = self.model.M @ Ej_inv
-
-        if self.model.x_lim is None:
-            Fx = np.zeros((1,1))
-        else:
-            Fx = self.model.Mx_aux @ self.model.Fx
 
         if normalize == True:
             Hj = np.zeros(self.Hj.shape, dtype=self.Hj.dtype)
@@ -550,7 +392,7 @@ class Hildreth:
         DU1 = (-Ej_inv)[:m, :]
         DU2 = (-Ej_inv @ self.model.M.T)[:m, :]
 
-        return (Fj1, Fj2, Fx, Kj1, Hj, DU1, DU2)
+        return (Kj1, Hj, DU1, DU2)
 
 
 @dataclass
