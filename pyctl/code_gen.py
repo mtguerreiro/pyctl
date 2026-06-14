@@ -278,7 +278,6 @@ class Hildreth:
     tol : float = 1e-6
     max_iter : int = 200
     fixed_iter : bool = True
-    normalize_h: bool = False
     _solver_data : str = 'dmpc_hild_data'
     _solve : str = 'dmpc_hild_solve'
 
@@ -331,16 +330,9 @@ dmpc_hild_data_t dmpc_hild_data = {{
         
         Kj_1 = model.M @ Ej_inv
 
-        if self.normalize_h == True:
-            Hj = np.zeros(Hj.shape, dtype=Hj.dtype)
-            Hj[:] = Hj[:]
-            Hj_aux = Hj.copy()
-            np.fill_diagonal(Hj_aux, 1)
-            Hj = np.linalg.inv(-np.diag(np.diag(Hj))) @ Hj_aux
-        else:
-            Hj = np.zeros(model.Hj.shape, dtype=model.Hj.dtype)
-            Hj[:] = model.Hj[:]
-            Hj[np.eye(Hj.shape[0],dtype=bool)] = -1 / Hj[np.eye(Hj.shape[0],dtype=bool)]
+        Hj = np.array(model.Hj)
+        Hd = -1.0 / np.array(Hj.diagonal())
+        np.fill_diagonal(Hj, Hd)
 
         DU_1 = (-Ej_inv)[:m, :]
         DU_2 = (-Ej_inv @ model.M.T)[:m, :]
